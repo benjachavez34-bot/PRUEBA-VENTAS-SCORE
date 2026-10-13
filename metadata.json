@@ -1,0 +1,8 @@
+{
+  "name": "Ventas Score — Deudores y Stock",
+  "description": "Control de ventas, deudores, stock y cierres de caja con registro compartido en tiempo real.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "permissions": []
+}
