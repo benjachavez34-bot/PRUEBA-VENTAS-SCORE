@@ -33,6 +33,7 @@ import { EstadisticasView } from './components/EstadisticasView';
 import { AdminVendedoresView } from './components/AdminVendedoresView';
 import { MiembrosChatView } from './components/MiembrosChatView';
 import { AyudaView } from './components/AyudaView';
+import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
@@ -71,8 +72,55 @@ export default function App() {
   const [dbError, setDbError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<
-    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'miembros' | 'equipo' | 'ayuda'
+    'venta' | 'deudores' | 'stock' | 'miembros' | 'resumen' | 'estadisticas' | 'equipo' | 'configuracion' | 'ayuda'
   >('venta');
+
+  // Configuración de tema visual y personalización
+  const [themeConfig, setThemeConfig] = useState<ThemeConfig>(() => {
+    try {
+      const saved = localStorage.getItem('app_theme_config');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      accentColor: '#2563eb',
+      customBgUrl: null,
+      mode: 'auto',
+      nombreEmpresa: 'Ventas Score',
+    };
+  });
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--accent', themeConfig.accentColor);
+    if (themeConfig.mode === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else if (themeConfig.mode === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }, [themeConfig]);
+
+  const handleSaveTheme = (newTheme: ThemeConfig) => {
+    setThemeConfig(newTheme);
+    try {
+      localStorage.setItem('app_theme_config', JSON.stringify(newTheme));
+    } catch {}
+  };
+
+  const handleResetTheme = () => {
+    const defaultTheme: ThemeConfig = {
+      accentColor: '#2563eb',
+      customBgUrl: null,
+      mode: 'auto',
+      nombreEmpresa: 'Ventas Score',
+    };
+    setThemeConfig(defaultTheme);
+    try {
+      localStorage.removeItem('app_theme_config');
+    } catch {}
+  };
+
+  const fotoPerfilInputRef = useRef<HTMLInputElement>(null);
 
   // Estado de Miembros y Chat en tiempo real
   const [miembros, setMiembros] = useState<Miembro[]>([]);
@@ -996,15 +1044,17 @@ export default function App() {
       ? 'Deudores'
       : activeTab === 'stock'
       ? 'Control de Stock'
+      : activeTab === 'miembros'
+      ? 'Miembros & Chat'
       : activeTab === 'resumen'
       ? 'Resumen de caja'
       : activeTab === 'estadisticas'
       ? 'Estadísticas'
-      : activeTab === 'miembros'
-      ? 'Miembros & Chat'
-      : activeTab === 'ayuda'
-      ? 'Ayuda & Asistente IA'
-      : 'Supervisión & Equipo';
+      : activeTab === 'equipo'
+      ? 'Supervisión & Equipo'
+      : activeTab === 'configuracion'
+      ? 'Configuración & Tema'
+      : 'Ayuda & Asistente IA';
 
   useEffect(() => {
     document.title = `${pageTitle} — Ventas Score`;
@@ -1014,7 +1064,7 @@ export default function App() {
   const isAdmin = isUserAdmin(user?.email);
 
   useEffect(() => {
-    const adminOnlyTabs = ['resumen', 'estadisticas', 'miembros', 'equipo'];
+    const adminOnlyTabs = ['resumen', 'estadisticas', 'equipo', 'configuracion'];
     if (!isAdmin && adminOnlyTabs.includes(activeTab)) {
       setActiveTab('venta');
     }
@@ -1105,10 +1155,10 @@ export default function App() {
 
   return (
     <>
-      {/* FONDO DE PANTALLA SCORE GORILLA Y SURTIDAS */}
+      {/* FONDO DE PANTALLA SCORE GORILLA Y SURTIDAS (O PERSONALIZADO) */}
       <div className="score-bg-container" aria-hidden="true">
         <img
-          src={scoreBgDesktop}
+          src={themeConfig.customBgUrl || scoreBgDesktop}
           alt=""
           className="score-bg-img"
           referrerPolicy="no-referrer"
@@ -1127,28 +1177,139 @@ export default function App() {
         {dbError && <div id="banner">{dbError}</div>}
 
       {!isAuthenticated ? (
-        <section
-          id="authPanel"
-          className="card"
-          style={{ maxWidth: 600, margin: '16px auto', padding: 20 }}
-        >
-          <h2 style={{ marginTop: 0 }}>Ventas Score</h2>
-          <p>
-            Inicia sesión con una cuenta Google autorizada para acceder al registro
-            compartido.
-          </p>
-          <div className="row" style={{ gap: 8 }}>
-            <button className="btn-primary" onClick={handleLoginGoogle}>
-              Continuar con Google
-            </button>
-            <button className="btn-ghost" onClick={handleGuestLogin}>
-              Modo Invitado / Local
-            </button>
-          </div>
-          <div className="sub" style={{ marginTop: 10 }}>
-            {authStatus}
-          </div>
-        </section>
+        <div className="auth-wrapper">
+          <section id="authPanel" className="auth-card">
+            {/* LOGO GORILLA DESTACADO */}
+            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 16 }}>
+              <img
+                src={scoreGorillaLogo}
+                alt="Logo Score Gorilla"
+                style={{
+                  width: 92,
+                  height: 92,
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '3px solid var(--accent)',
+                  boxShadow: '0 0 25px rgba(37,99,235,0.45)',
+                  margin: '0 auto',
+                  display: 'block',
+                }}
+                referrerPolicy="no-referrer"
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  bottom: -4,
+                  right: -4,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontSize: '0.65rem',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                PRO
+              </span>
+            </div>
+
+            {/* TÍTULO LLAMATIVO */}
+            <h1
+              style={{
+                margin: '0 0 6px 0',
+                fontSize: '2rem',
+                fontWeight: 900,
+                letterSpacing: '-0.5px',
+                background: 'linear-gradient(135deg, var(--text) 25%, var(--accent) 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Ventas Score
+            </h1>
+            <div
+              className="sub"
+              style={{
+                fontSize: '0.88rem',
+                lineHeight: 1.45,
+                maxWidth: 340,
+                margin: '0 auto 24px auto',
+              }}
+            >
+              Control integral de ventas, inventario, deudores y métricas en tiempo real.
+            </div>
+
+            {/* BOTONES DE ACCIÓN */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleLoginGoogle}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 12,
+                  padding: '12px 18px',
+                  fontSize: '0.96rem',
+                  fontWeight: 700,
+                  borderRadius: 12,
+                  boxShadow: '0 4px 15px rgba(37,99,235,0.35)',
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    fill="#EA4335"
+                  />
+                </svg>
+                <span>Continuar con Google</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={handleGuestLogin}
+                style={{
+                  padding: '10px 16px',
+                  fontSize: '0.86rem',
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                }}
+              >
+                Ingresar en Modo Invitado / Demo
+              </button>
+            </div>
+
+            {/* MENSAJE DE ESTADO */}
+            <div
+              className="sub"
+              style={{
+                marginTop: 20,
+                fontSize: '0.78rem',
+                borderTop: '1px solid var(--border)',
+                paddingTop: 14,
+              }}
+            >
+              🔒 {authStatus}
+            </div>
+          </section>
+        </div>
       ) : (
         <div id="appContent">
           {/* TOP USER BANNER */}
@@ -1170,7 +1331,9 @@ export default function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img
                 src={
-                  perfil.avatarId === 'avatar1'
+                  perfil.avatarId?.startsWith('data:image/') || perfil.avatarId?.startsWith('http')
+                    ? perfil.avatarId
+                    : perfil.avatarId === 'avatar1'
                     ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
                     : perfil.avatarId === 'avatar2'
                     ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
@@ -1291,6 +1454,12 @@ export default function App() {
             >
               📦 Stock
             </div>
+            <div
+              className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
+              onClick={() => setActiveTab('miembros')}
+            >
+              👥 Miembros & Chat
+            </div>
             {isAdmin && (
               <>
                 <div
@@ -1306,16 +1475,16 @@ export default function App() {
                   📊 Estadísticas
                 </div>
                 <div
-                  className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('miembros')}
-                >
-                  👥 Miembros & Chat
-                </div>
-                <div
                   className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
                   onClick={() => setActiveTab('equipo')}
                 >
                   🏢 Supervisión
+                </div>
+                <div
+                  className={`tab ${activeTab === 'configuracion' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('configuracion')}
+                >
+                  ⚙️ Configuración
                 </div>
               </>
             )}
@@ -2092,8 +2261,8 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW MIEMBROS & CHAT (SOLO ADMINISTRADORES) */}
-            {isAdmin && activeTab === 'miembros' && (
+            {/* VIEW MIEMBROS & CHAT (PARA TODOS: ADMINISTRADOR Y VENDEDORES) */}
+            {activeTab === 'miembros' && (
               <section id="viewMiembros">
                 <MiembrosChatView
                   miembros={miembros}
@@ -2124,6 +2293,17 @@ export default function App() {
                     setEditPerfil(perfil);
                     setModalCuentaOpen(true);
                   }}
+                />
+              </section>
+            )}
+
+            {/* VIEW CONFIGURACIÓN (SOLO ADMINISTRADORES) */}
+            {isAdmin && activeTab === 'configuracion' && (
+              <section id="viewConfiguracion">
+                <ConfiguracionView
+                  currentTheme={themeConfig}
+                  onSaveTheme={handleSaveTheme}
+                  onResetTheme={handleResetTheme}
                 />
               </section>
             )}
@@ -2666,7 +2846,9 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <img
                   src={
-                    editPerfil.avatarId === 'gorilla'
+                    editPerfil.avatarId?.startsWith('data:image/') || editPerfil.avatarId?.startsWith('http')
+                      ? editPerfil.avatarId
+                      : editPerfil.avatarId === 'gorilla'
                       ? scoreGorillaLogo
                       : editPerfil.avatarId === 'avatar1'
                       ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
@@ -2678,12 +2860,13 @@ export default function App() {
                   }
                   alt="Avatar"
                   style={{
-                    width: 52,
-                    height: 52,
+                    width: 56,
+                    height: 56,
                     borderRadius: '50%',
                     objectFit: 'cover',
                     border: '2px solid var(--accent)',
                     boxShadow: '0 0 10px rgba(37,99,235,0.3)',
+                    flexShrink: 0,
                   }}
                   referrerPolicy="no-referrer"
                 />
@@ -2694,7 +2877,7 @@ export default function App() {
                     style={{ fontSize: '0.78rem', padding: '4px 8px' }}
                     onClick={() => setEditPerfil((p) => ({ ...p, avatarId: 'gorilla' }))}
                   >
-                    🦍 Score Gorilla
+                    🦍 Gorilla
                   </button>
                   <button
                     type="button"
@@ -2720,6 +2903,65 @@ export default function App() {
                   >
                     🚀 Vendedor
                   </button>
+                </div>
+
+                {/* Subida de foto propia desde el dispositivo */}
+                <div style={{ width: '100%', marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                  <input
+                    ref={fotoPerfilInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const dataUrl = event.target?.result as string;
+                        if (!dataUrl) return;
+                        const img = new Image();
+                        img.onload = () => {
+                          const canvas = document.createElement('canvas');
+                          const size = 320;
+                          canvas.width = size;
+                          canvas.height = size;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            const minSide = Math.min(img.width, img.height);
+                            const sx = (img.width - minSide) / 2;
+                            const sy = (img.height - minSide) / 2;
+                            ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+                            const compressed = canvas.toDataURL('image/jpeg', 0.82);
+                            setEditPerfil((p) => ({ ...p, avatarId: compressed }));
+                          }
+                        };
+                        img.src = dataUrl;
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{
+                      fontSize: '0.82rem',
+                      padding: '6px 12px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontWeight: 600,
+                      border: '1px dashed var(--accent)',
+                      background: 'rgba(37,99,235,0.04)',
+                    }}
+                    onClick={() => fotoPerfilInputRef.current?.click()}
+                  >
+                    📷 Cargar foto propia desde mi dispositivo
+                  </button>
+                  {Boolean(editPerfil.avatarId?.startsWith('data:image/')) && (
+                    <span className="sub" style={{ fontSize: '0.74rem', marginLeft: 8, color: 'var(--accent3)', fontWeight: 600 }}>
+                      ✓ Foto personalizada lista
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

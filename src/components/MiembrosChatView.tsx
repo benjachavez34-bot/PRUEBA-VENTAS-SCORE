@@ -149,7 +149,9 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   };
 
   const getAvatarSrc = (avatarId?: string) => {
-    if (avatarId === 'gorilla' || !avatarId) return scoreGorillaLogo;
+    if (!avatarId) return scoreGorillaLogo;
+    if (avatarId.startsWith('data:image/') || avatarId.startsWith('http')) return avatarId;
+    if (avatarId === 'gorilla') return scoreGorillaLogo;
     if (avatarId === 'avatar1') return 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja';
     if (avatarId === 'avatar2') return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
     if (avatarId === 'avatar3') return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sara';
@@ -539,37 +541,78 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
           >
             {/* Si es Admin, puede marcar la categoría de la indicación */}
             {isAdmin && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem' }}>
-                <span className="sub" style={{ fontWeight: 600 }}>Tipo de indicación:</span>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: '0.8rem', padding: '2px 0' }}>
+                <span className="sub" style={{ fontWeight: 700, marginRight: 2 }}>Prioridad:</span>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    cursor: 'pointer',
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: tipoMensaje === 'general' ? 'var(--card)' : 'transparent',
+                    fontWeight: tipoMensaje === 'general' ? 700 : 500,
+                  }}
+                >
                   <input
                     type="radio"
                     name="tipoMsg"
                     value="general"
                     checked={tipoMensaje === 'general'}
                     onChange={() => setTipoMensaje('general')}
+                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
                   />
-                  General
+                  <span>General</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    cursor: 'pointer',
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    border: tipoMensaje === 'indicacion' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: tipoMensaje === 'indicacion' ? 'rgba(37,99,235,0.08)' : 'transparent',
+                    color: tipoMensaje === 'indicacion' ? 'var(--accent)' : 'var(--text)',
+                    fontWeight: tipoMensaje === 'indicacion' ? 700 : 500,
+                  }}
+                >
                   <input
                     type="radio"
                     name="tipoMsg"
                     value="indicacion"
                     checked={tipoMensaje === 'indicacion'}
                     onChange={() => setTipoMensaje('indicacion')}
+                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
                   />
-                  📢 Indicación Oficial
+                  <span>📢 Indicación</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', color: 'var(--accent2)', fontWeight: 600 }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    cursor: 'pointer',
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    border: tipoMensaje === 'urgente' ? '1px solid var(--accent2)' : '1px solid var(--border)',
+                    background: tipoMensaje === 'urgente' ? 'rgba(220,38,38,0.08)' : 'transparent',
+                    color: 'var(--accent2)',
+                    fontWeight: tipoMensaje === 'urgente' ? 700 : 500,
+                  }}
+                >
                   <input
                     type="radio"
                     name="tipoMsg"
                     value="urgente"
                     checked={tipoMensaje === 'urgente'}
                     onChange={() => setTipoMensaje('urgente')}
+                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
                   />
-                  ⚠️ Urgente
+                  <span>⚠️ Urgente</span>
                 </label>
               </div>
             )}

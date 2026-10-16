@@ -167,8 +167,9 @@ main {
   margin-top: 0;
 }
 
-input,
-select {
+input:not([type="radio"]):not([type="checkbox"]),
+select,
+textarea {
   flex: 1;
   min-width: 100px;
   padding: 10px;
@@ -177,6 +178,52 @@ select {
   background: var(--bg);
   color: var(--text);
   font-size: 1rem;
+}
+
+input[type="radio"],
+input[type="checkbox"] {
+  width: auto;
+  min-width: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.auth-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  position: relative;
+  z-index: 2;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 36px 28px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+  border-radius: 24px;
+  text-align: center;
+}
+
+:root[data-theme="dark"] .auth-card {
+  background: rgba(28, 31, 38, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .auth-card {
+    background: rgba(28, 31, 38, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  }
 }
 
 button {
