@@ -90,3 +90,28 @@ export interface EstadisticasPeriodo {
   topProductos: TopProductoItem[];
 }
 
+export interface Miembro {
+  id?: string;
+  email: string;
+  nombre: string;
+  rol: string;
+  telefono: string;
+  sucursal: string;
+  avatarId: string;
+  isAdmin: boolean;
+  estado?: 'disponible' | 'en_ruta' | 'ocupado';
+  ultimaActividad?: number;
+}
+
+export interface MensajeChat {
+  id?: string;
+  deEmail: string;
+  deNombre: string;
+  deRol: string;
+  avatarId?: string;
+  esAdmin: boolean;
+  texto: string;
+  ts: number;
+  tipo?: 'general' | 'indicacion' | 'urgente';
+}
+

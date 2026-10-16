@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -16,7 +17,7 @@ import {
   signOut,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Producto, Movimiento, CierreCaja, Deudor } from './types';
+import { Producto, Movimiento, CierreCaja, Deudor, Miembro, MensajeChat } from './types';
 import {
   fTs,
   fmt,
@@ -30,6 +31,7 @@ import {
 } from './utils/formatters';
 import { EstadisticasView } from './components/EstadisticasView';
 import { AdminVendedoresView } from './components/AdminVendedoresView';
+import { MiembrosChatView } from './components/MiembrosChatView';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
@@ -58,8 +60,12 @@ export default function App() {
   const [dbError, setDbError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<
-    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'equipo'
+    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'miembros' | 'equipo'
   >('venta');
+
+  // Estado de Miembros y Chat en tiempo real
+  const [miembros, setMiembros] = useState<Miembro[]>([]);
+  const [mensajes, setMensajes] = useState<MensajeChat[]>([]);
 
   // Estado de Mi Cuenta (Perfil)
   const [modalCuentaOpen, setModalCuentaOpen] = useState<boolean>(false);
@@ -283,10 +289,35 @@ export default function App() {
       }
     );
 
+    const unsubMiembros = onSnapshot(
+      collection(db, 'miembros'),
+      (snapshot) => {
+        const list = snapshot.docs.map(
+          (d) => ({ id: d.id, ...(d.data() as Omit<Miembro, 'id'>) })
+        );
+        setMiembros(list);
+      },
+      (err) => console.log('miembros err', err)
+    );
+
+    const unsubMensajes = onSnapshot(
+      collection(db, 'mensajes'),
+      (snapshot) => {
+        const list = snapshot.docs.map(
+          (d) => ({ id: d.id, ...(d.data() as Omit<MensajeChat, 'id'>) })
+        );
+        list.sort((a, b) => a.ts - b.ts);
+        setMensajes(list);
+      },
+      (err) => console.log('mensajes err', err)
+    );
+
     return () => {
       unsubProds();
       unsubCierres();
       unsubMovs();
+      unsubMiembros();
+      unsubMensajes();
     };
   }, [user, isGuest]);
 
@@ -910,7 +941,9 @@ export default function App() {
       ? 'Resumen de caja'
       : activeTab === 'estadisticas'
       ? 'Estadísticas'
-      : 'Equipo & Vendedores';
+      : activeTab === 'miembros'
+      ? 'Miembros & Chat'
+      : 'Supervisión & Equipo';
 
   useEffect(() => {
     document.title = `${pageTitle} — Ventas Score`;
@@ -926,6 +959,87 @@ export default function App() {
       setActiveTab('venta');
     }
   }, [isAdmin, activeTab]);
+
+  const handleEnviarMensaje = async (
+    texto: string,
+    tipo: 'general' | 'indicacion' | 'urgente' = 'general'
+  ) => {
+    const msgData: Omit<MensajeChat, 'id'> = {
+      deEmail: user?.email || (isGuest ? 'invitado@local' : perfil.email || ''),
+      deNombre: perfil.nombre || miNombre,
+      deRol: perfil.rol || (isAdmin ? 'Administrador General' : 'Vendedor'),
+      avatarId: perfil.avatarId,
+      esAdmin: isAdmin,
+      texto,
+      ts: Date.now(),
+      tipo,
+    };
+
+    if (isGuest) {
+      const nuevo: MensajeChat = { id: 'msg-' + Date.now(), ...msgData };
+      setMensajes((prev) => {
+        const updated = [...prev, nuevo];
+        try {
+          localStorage.setItem('local_mensajes', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      showToast('Mensaje enviado (modo local)');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'mensajes'), msgData);
+      showToast(isAdmin ? 'Indicación oficial enviada al equipo' : 'Mensaje enviado');
+    } catch (e: any) {
+      alert('No se pudo enviar el mensaje: ' + (e?.message || e));
+    }
+  };
+
+  const handleGuardarPerfil = async (nuevoPerfil: PerfilUsuario) => {
+    setPerfil(nuevoPerfil);
+    setMiNombre(nuevoPerfil.nombre);
+    try {
+      localStorage.setItem('perfil_usuario', JSON.stringify(nuevoPerfil));
+      localStorage.setItem('miNombre', nuevoPerfil.nombre);
+    } catch {}
+
+    const miembroData: Omit<Miembro, 'id'> = {
+      email: user?.email || nuevoPerfil.email || '',
+      nombre: nuevoPerfil.nombre,
+      rol: nuevoPerfil.rol,
+      telefono: nuevoPerfil.telefono,
+      sucursal: nuevoPerfil.sucursal,
+      avatarId: nuevoPerfil.avatarId,
+      isAdmin,
+      estado: 'disponible',
+      ultimaActividad: Date.now(),
+    };
+
+    if (isGuest) {
+      setMiembros((prev) => {
+        const filtered = prev.filter((m) => m.email !== miembroData.email);
+        const updated = [...filtered, { id: 'local-' + Date.now(), ...miembroData }];
+        try {
+          localStorage.setItem('local_miembros', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      setModalCuentaOpen(false);
+      showToast('Perfil actualizado con éxito');
+      return;
+    }
+
+    try {
+      const emailDocId = (user?.email || nuevoPerfil.email || 'usuario').replace(/[^a-zA-Z0-9_-]/g, '_');
+      await setDoc(doc(db, 'miembros', emailDocId), miembroData, { merge: true });
+      setModalCuentaOpen(false);
+      showToast('Perfil actualizado y sincronizado en Miembros');
+    } catch (e: any) {
+      setModalCuentaOpen(false);
+      showToast('Perfil guardado');
+    }
+  };
 
   const isAuthenticated = Boolean(user || isGuest);
 
