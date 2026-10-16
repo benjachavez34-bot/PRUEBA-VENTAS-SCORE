@@ -67,7 +67,15 @@ export default function App() {
   const [dPrecio, setDPrecio] = useState<string>('');
   const [dMonto, setDMonto] = useState<string>('');
   const [busquedaDeudor, setBusquedaDeudor] = useState<string>('');
+  const [expandedDeudores, setExpandedDeudores] = useState<Record<string, boolean>>({});
   const dNombreInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleDeudorDetalle = (nombre: string) => {
+    setExpandedDeudores((prev) => ({
+      ...prev,
+      [nombre]: !prev[nombre],
+    }));
+  };
 
   // Stock Form State
   const [pNombre, setPNombre] = useState<string>('');
@@ -1213,36 +1221,213 @@ export default function App() {
 
                 <div className="card" id="listaDeudores">
                   {deudoresFiltrados.length ? (
-                    deudoresFiltrados.map((d) => (
-                      <div className="item" key={d.nombre}>
-                        <div>
-                          <div className="name">{d.nombre}</div>
-                          <div className={`amount ${d.deuda > 0 ? 'debt' : 'ok'}`}>
-                            {d.deuda > 0 ? fmt(d.deuda) : 'Al día'}
+                    deudoresFiltrados.map((d) => {
+                      const isExpanded = Boolean(expandedDeudores[d.nombre]);
+                      const clienteMovs = movs.filter(
+                        (m) =>
+                          m.cliente &&
+                          m.cliente.trim().toLowerCase() === d.nombre.trim().toLowerCase()
+                      );
+                      const comprasFiadas = clienteMovs
+                        .filter((m) => (m.tipo === 'venta' && m.fiado) || m.tipo === 'deuda')
+                        .sort((a, b) => b.ts - a.ts);
+                      const pagos = clienteMovs
+                        .filter((m) => m.tipo === 'pago')
+                        .sort((a, b) => b.ts - a.ts);
+
+                      return (
+                        <div
+                          key={d.nombre}
+                          style={{
+                            borderBottom: '1px solid var(--border)',
+                            paddingBottom: isExpanded ? 6 : 0,
+                          }}
+                        >
+                          <div className="item" style={{ borderBottom: 'none' }}>
+                            <div
+                              style={{ cursor: 'pointer', flex: 1, userSelect: 'none' }}
+                              onClick={() => toggleDeudorDetalle(d.nombre)}
+                              title="Toca para ver u ocultar productos que debe"
+                            >
+                              <div
+                                className="name"
+                                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                              >
+                                <span>{d.nombre}</span>
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    color: 'var(--muted)',
+                                    fontWeight: 600,
+                                    background: 'var(--bg)',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    border: '1px solid var(--border)',
+                                  }}
+                                >
+                                  {isExpanded
+                                    ? '▲ Ocultar'
+                                    : `▼ ${comprasFiadas.length} compra${comprasFiadas.length === 1 ? '' : 's'}`}
+                                </span>
+                              </div>
+                              <div className={`amount ${d.deuda > 0 ? 'debt' : 'ok'}`}>
+                                {d.deuda > 0 ? fmt(d.deuda) : 'Al día'}
+                              </div>
+                            </div>
+                            <div className="actions">
+                              <button
+                                className="btn-green"
+                                onClick={() => handleOpenAbonar(d.nombre, d.deuda)}
+                              >
+                                Pago
+                              </button>
+                              <button
+                                className="btn-red"
+                                onClick={() => handleSumarDeuda(d.nombre)}
+                              >
+                                +Deuda
+                              </button>
+                              <button
+                                className="btn-ghost"
+                                onClick={() => handleSaldar(d.nombre, d.deuda)}
+                              >
+                                ✔ Pagó todo
+                              </button>
+                            </div>
                           </div>
+
+                          {/* PANEL DESPLEGABLE CON PRODUCTOS QUE HA COMPRADO Y DEBE */}
+                          {isExpanded && (
+                            <div
+                              style={{
+                                margin: '0 4px 10px 4px',
+                                padding: '10px 12px',
+                                background: 'var(--bg)',
+                                borderRadius: 8,
+                                border: '1px solid var(--border)',
+                                fontSize: '0.85rem',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: '0.85rem',
+                                  marginBottom: 8,
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span>📦 Productos que ha comprado y debe:</span>
+                                <span className="sub">{comprasFiadas.length} compras registradas</span>
+                              </div>
+
+                              {comprasFiadas.length === 0 ? (
+                                <div className="sub" style={{ fontStyle: 'italic', padding: '4px 0' }}>
+                                  No hay productos registrados con saldo pendiente.
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  {comprasFiadas.map((m, idx) => (
+                                    <div
+                                      key={m.id || m.ts || idx}
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '4px 0',
+                                        borderBottom:
+                                          idx < comprasFiadas.length - 1
+                                            ? '1px dashed var(--border)'
+                                            : 'none',
+                                      }}
+                                    >
+                                      <div>
+                                        <div style={{ fontWeight: 600 }}>
+                                          {m.producto
+                                            ? `${m.cant ? `${m.cant}x ` : ''}${m.producto}`
+                                            : m.nota || 'Deuda manual'}
+                                        </div>
+                                        <div className="sub" style={{ fontSize: '0.75rem' }}>
+                                          {fTs(m.ts)}
+                                          {m.por ? ` · ${m.por}` : ''}
+                                          {m.producto && m.nota ? ` (${m.nota})` : ''}
+                                        </div>
+                                      </div>
+                                      <div
+                                        className="amount debt"
+                                        style={{ fontSize: '0.95rem', fontWeight: 600 }}
+                                      >
+                                        {fmt(m.total || 0)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Historial de abonos/pagos */}
+                              {pagos.length > 0 && (
+                                <div
+                                  style={{
+                                    marginTop: 10,
+                                    paddingTop: 8,
+                                    borderTop: '1px solid var(--border)',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontWeight: 600,
+                                      fontSize: '0.8rem',
+                                      color: 'var(--muted)',
+                                      marginBottom: 4,
+                                    }}
+                                  >
+                                    Abonos y pagos recibidos:
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    {pagos.slice(0, 5).map((p, idx) => (
+                                      <div
+                                        key={p.id || p.ts || idx}
+                                        style={{
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          fontSize: '0.8rem',
+                                        }}
+                                      >
+                                        <span className="sub">
+                                          {fTs(p.ts)} {p.nota ? `(${p.nota})` : ''}
+                                        </span>
+                                        <span className="amount ok" style={{ fontSize: '0.85rem' }}>
+                                          -{fmt(p.total || 0)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Saldo adeudado actual */}
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  paddingTop: 6,
+                                  borderTop: '1px solid var(--border)',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                <span>Saldo total adeudado:</span>
+                                <span className="debt" style={{ fontSize: '1.05rem' }}>
+                                  {fmt(d.deuda)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="actions">
-                          <button
-                            className="btn-green"
-                            onClick={() => handleOpenAbonar(d.nombre, d.deuda)}
-                          >
-                            Pago
-                          </button>
-                          <button
-                            className="btn-red"
-                            onClick={() => handleSumarDeuda(d.nombre)}
-                          >
-                            +Deuda
-                          </button>
-                          <button
-                            className="btn-ghost"
-                            onClick={() => handleSaldar(d.nombre, d.deuda)}
-                          >
-                            ✔ Pagó todo
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : deudoresList.length > 0 ? (
                     <div className="empty">
                       No se encontraron deudores que coincidan con "{busquedaDeudor}"
