@@ -29,15 +29,27 @@ import {
   porCobrarTotal,
 } from './utils/formatters';
 import { EstadisticasView } from './components/EstadisticasView';
+import { AdminVendedoresView } from './components/AdminVendedoresView';
+import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
+import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
+
+export interface PerfilUsuario {
+  nombre: string;
+  email: string;
+  rol: string;
+  telefono: string;
+  sucursal: string;
+  avatarId: string;
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isGuest, setIsGuest] = useState<boolean>(false);
   const [miNombre, setMiNombre] = useState<string>(() => {
     try {
-      return localStorage.getItem('miNombre') || '';
+      return localStorage.getItem('miNombre') || 'Benjamín Chávez';
     } catch {
-      return '';
+      return 'Benjamín Chávez';
     }
   });
   const [authStatus, setAuthStatus] = useState<string>(
@@ -45,7 +57,27 @@ export default function App() {
   );
   const [dbError, setDbError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas'>('venta');
+  const [activeTab, setActiveTab] = useState<
+    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'equipo'
+  >('venta');
+
+  // Estado de Mi Cuenta (Perfil)
+  const [modalCuentaOpen, setModalCuentaOpen] = useState<boolean>(false);
+  const [perfil, setPerfil] = useState<PerfilUsuario>(() => {
+    try {
+      const saved = localStorage.getItem('perfil_usuario');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      nombre: 'Benjamín Chávez',
+      email: 'benja.chavez34@gmail.com',
+      rol: 'Administrador General & Director Comercial',
+      telefono: '+56 9 8765 4321',
+      sucursal: 'Casa Central - Santiago',
+      avatarId: 'gorilla',
+    };
+  });
+  const [editPerfil, setEditPerfil] = useState<PerfilUsuario>(perfil);
 
   // App data
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -856,7 +888,9 @@ export default function App() {
       ? 'Control de Stock'
       : activeTab === 'resumen'
       ? 'Resumen de caja'
-      : 'Estadísticas';
+      : activeTab === 'estadisticas'
+      ? 'Estadísticas'
+      : 'Equipo & Vendedores';
 
   useEffect(() => {
     document.title = `${pageTitle} — Ventas Score`;
@@ -866,10 +900,10 @@ export default function App() {
 
   return (
     <>
-      {/* FONDO DE PANTALLA SCORE GORILLA */}
+      {/* FONDO DE PANTALLA SCORE GORILLA Y SURTIDAS */}
       <div className="score-bg-container" aria-hidden="true">
         <img
-          src="/src/assets/images/score_surtidas_desktop_bg_1792157664500.jpg"
+          src={scoreBgDesktop}
           alt=""
           className="score-bg-img"
           referrerPolicy="no-referrer"
@@ -912,10 +946,10 @@ export default function App() {
         </section>
       ) : (
         <div id="appContent">
-          {/* Top user bar con identidad Score Gorilla sin barra invasiva */}
+          {/* TOP USER & MI CUENTA BANNER */}
           <div
             style={{
-              padding: '8px 14px',
+              padding: '10px 16px',
               background: 'var(--card)',
               borderBottom: '1px solid var(--border)',
               display: 'flex',
@@ -923,34 +957,88 @@ export default function App() {
               alignItems: 'center',
               fontSize: '0.85rem',
               backdropFilter: 'blur(8px)',
+              flexWrap: 'wrap',
+              gap: 8,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Branding & Logo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img
-                src="/src/assets/images/score_gorilla_bg_1791923074721.jpg"
-                alt="Score Gorilla"
+                src={
+                  perfil.avatarId === 'gorilla'
+                    ? scoreGorillaLogo
+                    : perfil.avatarId === 'avatar1'
+                    ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
+                    : perfil.avatarId === 'avatar2'
+                    ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
+                    : scoreGorillaLogo
+                }
+                alt="Avatar"
                 style={{
-                  width: 24,
-                  height: 24,
+                  width: 32,
+                  height: 32,
                   borderRadius: '50%',
                   objectFit: 'cover',
                   border: '1.5px solid var(--border)',
-                  boxShadow: '0 0 8px rgba(6, 182, 212, 0.45)',
+                  boxShadow: '0 0 10px rgba(6, 182, 212, 0.45)',
                 }}
                 referrerPolicy="no-referrer"
               />
-              <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Ventas Score</span>
-              <span className="sub" style={{ fontSize: '0.78rem' }}>
-                ({isGuest ? `Local: ${miNombre}` : user?.email || miNombre})
-              </span>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>Ventas Score</span>
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    👑 Admin
+                  </span>
+                </div>
+                <div className="sub" style={{ fontSize: '0.74rem' }}>
+                  {perfil.nombre} · {perfil.rol}
+                </div>
+              </div>
             </div>
-            <button
-              className="btn-ghost"
-              style={{ padding: '4px 8px', fontSize: '0.8rem' }}
-              onClick={handleLogout}
-            >
-              Cerrar sesión
-            </button>
+
+            {/* Actions: Mi Cuenta & Logout */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(37,99,235,0.06)',
+                }}
+                onClick={() => {
+                  setEditPerfil(perfil);
+                  setModalCuentaOpen(true);
+                }}
+                title="Configurar perfil, foto y datos personales"
+              >
+                👤 Mi Cuenta
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ padding: '5px 10px', fontSize: '0.8rem' }}
+                onClick={handleLogout}
+              >
+                Cerrar sesión
+              </button>
+            </div>
           </div>
 
           <div className="tabs" style={{ flexWrap: 'wrap' }}>
@@ -983,6 +1071,12 @@ export default function App() {
               onClick={() => setActiveTab('estadisticas')}
             >
               📊 Estadísticas
+            </div>
+            <div
+              className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
+              onClick={() => setActiveTab('equipo')}
+            >
+              🏢 Equipo & Vendedores
             </div>
           </div>
 
@@ -1750,6 +1844,22 @@ export default function App() {
                 />
               </section>
             )}
+
+            {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL) */}
+            {activeTab === 'equipo' && (
+              <section id="viewEquipo">
+                <AdminVendedoresView
+                  movs={movs}
+                  cierres={cierres}
+                  adminName={perfil.nombre}
+                  adminEmail={perfil.email}
+                  onOpenMiCuenta={() => {
+                    setEditPerfil(perfil);
+                    setModalCuentaOpen(true);
+                  }}
+                />
+              </section>
+            )}
           </main>
         </div>
       )}
@@ -2211,6 +2321,208 @@ export default function App() {
                 onClick={handleConfirmarVentaRapida}
               >
                 Registrar venta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MI CUENTA / CONFIGURACIÓN DE PERFIL */}
+      {modalCuentaOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalCuentaOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 480,
+              width: '100%',
+              margin: 0,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 14px 35px rgba(0, 0, 0, 0.45)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ fontWeight: 800, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>👤 Mi Cuenta</span>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    padding: '2px 8px',
+                    borderRadius: 10,
+                  }}
+                >
+                  ADMINISTRADOR
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ padding: '2px 8px', fontSize: '0.9rem' }}
+                onClick={() => setModalCuentaOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* SELECCIÓN DE FOTO DE PERFIL / AVATAR */}
+            <div style={{ marginBottom: 16, padding: '12px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 8 }}>
+                Foto de Perfil / Avatar Corporativo
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <img
+                  src={
+                    editPerfil.avatarId === 'gorilla'
+                      ? scoreGorillaLogo
+                      : editPerfil.avatarId === 'avatar1'
+                      ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
+                      : editPerfil.avatarId === 'avatar2'
+                      ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
+                      : scoreGorillaLogo
+                  }
+                  alt="Avatar"
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    border: '2px solid var(--accent)',
+                    boxShadow: '0 0 10px rgba(37,99,235,0.3)',
+                  }}
+                  referrerPolicy="no-referrer"
+                />
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={editPerfil.avatarId === 'gorilla' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                    onClick={() => setEditPerfil((p) => ({ ...p, avatarId: 'gorilla' }))}
+                  >
+                    🦍 Score Gorilla
+                  </button>
+                  <button
+                    type="button"
+                    className={editPerfil.avatarId === 'avatar1' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                    onClick={() => setEditPerfil((p) => ({ ...p, avatarId: 'avatar1' }))}
+                  >
+                    👔 Director
+                  </button>
+                  <button
+                    type="button"
+                    className={editPerfil.avatarId === 'avatar2' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                    onClick={() => setEditPerfil((p) => ({ ...p, avatarId: 'avatar2' }))}
+                  >
+                    💼 Ejecutivo
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* CAMPOS EDITABLES DE PERFIL */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  Nombre y Apellidos:
+                </label>
+                <input
+                  type="text"
+                  value={editPerfil.nombre}
+                  onChange={(e) => setEditPerfil((p) => ({ ...p, nombre: e.target.value }))}
+                  placeholder="Ej: Benjamín Chávez"
+                />
+              </div>
+
+              <div>
+                <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  Correo electrónico:
+                </label>
+                <input
+                  type="email"
+                  value={editPerfil.email}
+                  onChange={(e) => setEditPerfil((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="benja.chavez34@gmail.com"
+                />
+              </div>
+
+              <div>
+                <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                  Cargo / Rol en la empresa:
+                </label>
+                <input
+                  type="text"
+                  value={editPerfil.rol}
+                  onChange={(e) => setEditPerfil((p) => ({ ...p, rol: e.target.value }))}
+                  placeholder="Administrador General & Director Comercial"
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                    Teléfono / WhatsApp:
+                  </label>
+                  <input
+                    type="text"
+                    value={editPerfil.telefono}
+                    onChange={(e) => setEditPerfil((p) => ({ ...p, telefono: e.target.value }))}
+                    placeholder="+56 9 8765 4321"
+                  />
+                </div>
+                <div>
+                  <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                    Sucursal / Zona comercial:
+                  </label>
+                  <input
+                    type="text"
+                    value={editPerfil.sucursal}
+                    onChange={(e) => setEditPerfil((p) => ({ ...p, sucursal: e.target.value }))}
+                    placeholder="Casa Central - Santiago"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalCuentaOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-green"
+                onClick={() => {
+                  setPerfil(editPerfil);
+                  setMiNombre(editPerfil.nombre);
+                  try {
+                    localStorage.setItem('perfil_usuario', JSON.stringify(editPerfil));
+                    localStorage.setItem('miNombre', editPerfil.nombre);
+                  } catch {}
+                  setModalCuentaOpen(false);
+                  showToast('Datos de cuenta guardados con éxito');
+                }}
+              >
+                Guardar cambios
               </button>
             </div>
           </div>
