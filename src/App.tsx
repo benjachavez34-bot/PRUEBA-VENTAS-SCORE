@@ -32,8 +32,19 @@ import {
 import { EstadisticasView } from './components/EstadisticasView';
 import { AdminVendedoresView } from './components/AdminVendedoresView';
 import { MiembrosChatView } from './components/MiembrosChatView';
+import { AyudaView } from './components/AyudaView';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
+
+export const ADMIN_EMAILS = [
+  'benja.chavez34@gmail.com',
+  'fco.inzunza.re@gmail.com',
+];
+
+export const isUserAdmin = (email?: string | null): boolean => {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+};
 
 export interface PerfilUsuario {
   nombre: string;
@@ -60,7 +71,7 @@ export default function App() {
   const [dbError, setDbError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<
-    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'miembros' | 'equipo'
+    'venta' | 'deudores' | 'stock' | 'resumen' | 'estadisticas' | 'miembros' | 'equipo' | 'ayuda'
   >('venta');
 
   // Estado de Miembros y Chat en tiempo real
@@ -186,10 +197,14 @@ export default function App() {
       if (currentUser) {
         setUser(currentUser);
         setIsGuest(false);
-        const emailLower = (currentUser.email || '').toLowerCase();
+        const emailLower = (currentUser.email || '').toLowerCase().trim();
+        const isCurrentAdmin = isUserAdmin(emailLower);
         const isBenja = emailLower === 'benja.chavez34@gmail.com';
+        const isFco = emailLower === 'fco.inzunza.re@gmail.com';
         const name = isBenja
           ? (currentUser.displayName || 'Benjamín Chávez')
+          : isFco
+          ? (currentUser.displayName || 'Francisco Inzunza')
           : (currentUser.displayName || currentUser.email || 'Socio');
         setMiNombre(name);
         try {
@@ -198,21 +213,25 @@ export default function App() {
         setAuthStatus(`Conectado como ${currentUser.email || name}`);
         setDbError(null);
 
-        if (isBenja) {
-          const savedBenja =
-            localStorage.getItem('perfil_usuario_benja.chavez34@gmail.com') ||
-            localStorage.getItem('perfil_usuario');
-          if (savedBenja) {
+        if (isCurrentAdmin) {
+          const savedAdmin =
+            localStorage.getItem(`perfil_usuario_${emailLower}`) ||
+            (isBenja ? localStorage.getItem('perfil_usuario') : null);
+          if (savedAdmin) {
             try {
-              setPerfil(JSON.parse(savedBenja));
+              setPerfil(JSON.parse(savedAdmin));
             } catch {}
           } else {
-            setPerfil((prev) => ({
-              ...prev,
+            setPerfil({
               nombre: name,
-              email: currentUser.email || 'benja.chavez34@gmail.com',
-              rol: 'Administrador General & Director Comercial',
-            }));
+              email: currentUser.email || emailLower,
+              rol: isFco
+                ? 'Administrador General & Socio'
+                : 'Administrador General & Director Comercial',
+              telefono: isBenja ? '+56 9 8765 4321' : '',
+              sucursal: 'Casa Central - Santiago',
+              avatarId: 'gorilla',
+            });
           }
         } else {
           const userStorageKey = `perfil_usuario_${emailLower}`;
@@ -983,19 +1002,20 @@ export default function App() {
       ? 'Estadísticas'
       : activeTab === 'miembros'
       ? 'Miembros & Chat'
+      : activeTab === 'ayuda'
+      ? 'Ayuda & Asistente IA'
       : 'Supervisión & Equipo';
 
   useEffect(() => {
     document.title = `${pageTitle} — Ventas Score`;
   }, [pageTitle]);
 
-  // Rol de Administrador exclusivo para la cuenta benja.chavez34@gmail.com
-  const isAdmin = Boolean(
-    user && user.email && user.email.toLowerCase() === 'benja.chavez34@gmail.com'
-  );
+  // Rol de Administrador para benja.chavez34@gmail.com y fco.inzunza.re@gmail.com
+  const isAdmin = isUserAdmin(user?.email);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === 'equipo') {
+    const adminOnlyTabs = ['resumen', 'estadisticas', 'miembros', 'equipo'];
+    if (!isAdmin && adminOnlyTabs.includes(activeTab)) {
       setActiveTab('venta');
     }
   }, [isAdmin, activeTab]);
@@ -1252,7 +1272,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="tabs" style={{ flexWrap: 'wrap' }}>
+          <div className="tabs">
             <div
               className={`tab ${activeTab === 'venta' ? 'active' : ''}`}
               onClick={() => setActiveTab('venta')}
@@ -1271,32 +1291,40 @@ export default function App() {
             >
               📦 Stock
             </div>
-            <div
-              className={`tab ${activeTab === 'resumen' ? 'active' : ''}`}
-              onClick={() => setActiveTab('resumen')}
-            >
-              💰 Resumen
-            </div>
-            <div
-              className={`tab ${activeTab === 'estadisticas' ? 'active' : ''}`}
-              onClick={() => setActiveTab('estadisticas')}
-            >
-              📊 Estadísticas
-            </div>
-            <div
-              className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
-              onClick={() => setActiveTab('miembros')}
-            >
-              👥 Miembros & Chat
-            </div>
             {isAdmin && (
-              <div
-                className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
-                onClick={() => setActiveTab('equipo')}
-              >
-                🏢 Supervisión
-              </div>
+              <>
+                <div
+                  className={`tab ${activeTab === 'resumen' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('resumen')}
+                >
+                  💰 Resumen
+                </div>
+                <div
+                  className={`tab ${activeTab === 'estadisticas' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('estadisticas')}
+                >
+                  📊 Estadísticas
+                </div>
+                <div
+                  className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('miembros')}
+                >
+                  👥 Miembros & Chat
+                </div>
+                <div
+                  className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('equipo')}
+                >
+                  🏢 Supervisión
+                </div>
+              </>
             )}
+            <div
+              className={`tab ${activeTab === 'ayuda' ? 'active' : ''}`}
+              onClick={() => setActiveTab('ayuda')}
+            >
+              🤖 Ayuda IA
+            </div>
           </div>
 
           <main>
@@ -1858,8 +1886,8 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW RESUMEN */}
-            {activeTab === 'resumen' && (
+            {/* VIEW RESUMEN (SOLO ADMINISTRADORES) */}
+            {isAdmin && activeTab === 'resumen' && (
               <section id="viewResumen">
                 <div className="card" id="resPeriodo">
                   <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
@@ -2053,8 +2081,8 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW ESTADISTICAS */}
-            {activeTab === 'estadisticas' && (
+            {/* VIEW ESTADISTICAS (SOLO ADMINISTRADORES) */}
+            {isAdmin && activeTab === 'estadisticas' && (
               <section id="viewEstadisticas">
                 <EstadisticasView
                   movs={movs}
@@ -2064,8 +2092,8 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW MIEMBROS & CHAT (PARA TODOS: ADMINISTRADOR Y VENDEDORES) */}
-            {activeTab === 'miembros' && (
+            {/* VIEW MIEMBROS & CHAT (SOLO ADMINISTRADORES) */}
+            {isAdmin && activeTab === 'miembros' && (
               <section id="viewMiembros">
                 <MiembrosChatView
                   miembros={miembros}
@@ -2084,7 +2112,7 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL - SOLO PARA benja.chavez34@gmail.com) */}
+            {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL) */}
             {isAdmin && activeTab === 'equipo' && (
               <section id="viewEquipo">
                 <AdminVendedoresView
@@ -2096,6 +2124,17 @@ export default function App() {
                     setEditPerfil(perfil);
                     setModalCuentaOpen(true);
                   }}
+                />
+              </section>
+            )}
+
+            {/* VIEW AYUDA & ASISTENTE IA (PARA TODOS LOS USUARIOS) */}
+            {activeTab === 'ayuda' && (
+              <section id="viewAyuda">
+                <AyudaView
+                  userName={perfil.nombre || miNombre}
+                  isAdmin={isAdmin}
+                  onNavigateTab={(tab) => setActiveTab(tab as any)}
                 />
               </section>
             )}

@@ -51,32 +51,42 @@ body {
 .tabs {
   display: flex;
   gap: 6px;
-  padding: 8px;
+  padding: 8px 10px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
-  flex: 1;
+  flex-shrink: 0;
   text-align: center;
   font-size: 0.85rem;
-  padding: 10px 2px;
-  border-radius: 10px;
+  padding: 8px 14px;
+  border-radius: 20px;
   font-weight: 600;
   cursor: pointer;
   color: var(--muted);
   user-select: none;
   transition: background 0.15s ease, color 0.15s ease;
+  border: 1px solid transparent;
 }
 
 .tab.active {
   background: var(--accent);
   color: #fff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
 main {
   padding: 12px;
-  max-width: 600px;
+  max-width: 680px;
   margin: 0 auto;
 }
 
@@ -87,6 +97,27 @@ main {
   padding: 12px;
   margin-bottom: 10px;
   backdrop-filter: blur(8px);
+}
+
+@media (max-width: 640px) {
+  main {
+    padding: 8px 6px;
+  }
+  .card {
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+  }
+  input, select, textarea {
+    font-size: 16px !important; /* Previene el zoom automático molesto en iPhone / Safari */
+  }
+  .total-bar {
+    padding: 10px;
+    font-size: 0.95rem;
+  }
+  .row {
+    gap: 6px;
+  }
 }
 
 .score-bg-container {

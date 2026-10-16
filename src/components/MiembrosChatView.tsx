@@ -15,6 +15,16 @@ interface MiembrosChatViewProps {
   onOpenMiCuenta: () => void;
 }
 
+const ADMIN_EMAILS = [
+  'benja.chavez34@gmail.com',
+  'fco.inzunza.re@gmail.com',
+];
+
+const esAdminEmail = (email?: string) => {
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+};
+
 export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   miembros,
   mensajes,
@@ -50,8 +60,8 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       (m) => m.email?.toLowerCase() === 'benja.chavez34@gmail.com'
     );
     if (benjaEnLista) {
-      list.push(benjaEnLista);
-      emails.add(benjaEnLista.email.toLowerCase());
+      list.push({ ...benjaEnLista, isAdmin: true });
+      emails.add('benja.chavez34@gmail.com');
     } else {
       list.push({
         id: 'admin-benja',
@@ -65,6 +75,28 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
         estado: 'disponible',
       });
       emails.add('benja.chavez34@gmail.com');
+    }
+
+    // Francisco Inzunza garantizado como Admin
+    const fcoEnLista = miembros.find(
+      (m) => m.email?.toLowerCase() === 'fco.inzunza.re@gmail.com'
+    );
+    if (fcoEnLista) {
+      list.push({ ...fcoEnLista, isAdmin: true });
+      emails.add('fco.inzunza.re@gmail.com');
+    } else {
+      list.push({
+        id: 'admin-fco',
+        nombre: 'Francisco Inzunza',
+        email: 'fco.inzunza.re@gmail.com',
+        rol: 'Administrador General & Socio',
+        telefono: '',
+        sucursal: 'Casa Central - Santiago',
+        avatarId: 'gorilla',
+        isAdmin: true,
+        estado: 'disponible',
+      });
+      emails.add('fco.inzunza.re@gmail.com');
     }
 
     // Agregar el resto de miembros
@@ -196,7 +228,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             }}
           >
             {listaMiembros.map((m) => {
-              const esBenjaAdmin = m.isAdmin || m.email?.toLowerCase() === 'benja.chavez34@gmail.com';
+              const esAdminCard = m.isAdmin || esAdminEmail(m.email);
               const telClean = (m.telefono || '').replace(/[^0-9+]/g, '');
 
               return (
@@ -210,8 +242,8 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                     flexDirection: 'column',
                     justifyContent: 'space-between',
                     gap: 12,
-                    border: esBenjaAdmin ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-                    background: esBenjaAdmin
+                    border: esAdminCard ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                    background: esAdminCard
                       ? 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.04) 100%)'
                       : 'var(--card)',
                   }}
@@ -226,8 +258,8 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                         height: 50,
                         borderRadius: '50%',
                         objectFit: 'cover',
-                        border: esBenjaAdmin ? '2px solid var(--accent)' : '1.5px solid var(--border)',
-                        boxShadow: esBenjaAdmin ? '0 0 10px rgba(37,99,235,0.35)' : 'none',
+                        border: esAdminCard ? '2px solid var(--accent)' : '1.5px solid var(--border)',
+                        boxShadow: esAdminCard ? '0 0 10px rgba(37,99,235,0.35)' : 'none',
                         flexShrink: 0,
                       }}
                       referrerPolicy="no-referrer"
@@ -236,7 +268,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>{m.nombre}</span>
-                        {esBenjaAdmin ? (
+                        {esAdminCard ? (
                           <span
                             style={{
                               fontSize: '0.65rem',
@@ -268,7 +300,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                       </div>
 
                       <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>
-                        {m.rol || (esBenjaAdmin ? 'Director Comercial' : 'Vendedor')}
+                        {m.rol || (esAdminCard ? 'Administrador' : 'Vendedor')}
                       </div>
 
                       <div className="sub" style={{ fontSize: '0.75rem', marginTop: 3 }}>
@@ -386,7 +418,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             ) : (
               mensajes.map((msg, idx) => {
                 const esMio = msg.deEmail?.toLowerCase() === emailActual.toLowerCase();
-                const esAdminMsg = msg.esAdmin || msg.deEmail?.toLowerCase() === 'benja.chavez34@gmail.com';
+                const esAdminMsg = msg.esAdmin || esAdminEmail(msg.deEmail);
                 const esUrgente = msg.tipo === 'urgente';
                 const esIndicacion = msg.tipo === 'indicacion';
 
