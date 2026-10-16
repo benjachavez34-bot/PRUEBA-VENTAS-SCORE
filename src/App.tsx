@@ -34,6 +34,8 @@ import { AdminVendedoresView } from './components/AdminVendedoresView';
 import { MiembrosChatView } from './components/MiembrosChatView';
 import { AyudaView } from './components/AyudaView';
 import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
+import { BarcodeScannerModal } from './components/BarcodeScannerModal';
+import { identifyProductByBarcode } from './utils/barcodeCatalog';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
@@ -179,6 +181,12 @@ export default function App() {
   const [pStock, setPStock] = useState<string>('');
   const [pCosto, setPCosto] = useState<string>('');
   const [pPrecio, setPPrecio] = useState<string>('');
+  const [pCodigoBarra, setPCodigoBarra] = useState<string>('');
+  const [scannerOpen, setScannerOpen] = useState<boolean>(false);
+  const [scannedFeedback, setScannedFeedback] = useState<{
+    msg: string;
+    type: 'success' | 'info' | 'warn';
+  } | null>(null);
 
   // Modal de Abono / Pago
   const [modalAbono, setModalAbono] = useState<{
@@ -703,11 +711,66 @@ export default function App() {
   };
 
   // Stock Handlers
+  const handleBarcodeScanned = (barcode: string) => {
+    const clean = barcode.trim();
+    if (!clean) return;
+    setPCodigoBarra(clean);
+    setScannerOpen(false);
+
+    const match = identifyProductByBarcode(clean, productos);
+    if (match.found) {
+      setPNombre(match.nombre);
+      if (match.sugerenciaPrecio && (!pPrecio || pPrecio === '0')) {
+        setPPrecio(String(match.sugerenciaPrecio));
+      }
+      if (match.existingProduct) {
+        setScannedFeedback({
+          type: 'success',
+          msg: `Producto detectado en tu inventario: "${match.nombre}". Ingresa la cantidad comprada y costo de entrada.`,
+        });
+      } else {
+        setScannedFeedback({
+          type: 'success',
+          msg: `Identificado en catálogo: "${match.nombre}" (${match.categoria || 'Energéticas'}). Precio sugerido: ${match.sugerenciaPrecio ? fmt(match.sugerenciaPrecio) : 'N/A'}. Ingresa cantidad y costo.`,
+        });
+      }
+    } else {
+      setScannedFeedback({
+        type: 'info',
+        msg: `Código leído: ${clean}. Producto nuevo: completa el nombre, cantidad y precios.`,
+      });
+    }
+    showToast(`Código ${clean} escaneado correctamente`);
+  };
+
+  const handleBarcodeManualChange = (code: string) => {
+    setPCodigoBarra(code);
+    const clean = code.trim();
+    if (clean.length >= 7) {
+      const match = identifyProductByBarcode(clean, productos);
+      if (match.found && !pNombre) {
+        setPNombre(match.nombre);
+        if (match.sugerenciaPrecio && (!pPrecio || pPrecio === '0')) {
+          setPPrecio(String(match.sugerenciaPrecio));
+        }
+        setScannedFeedback({
+          type: 'success',
+          msg: `Identificado automáticamente: "${match.nombre}"`,
+        });
+      }
+    }
+  };
+
   const handleAgregarProducto = async () => {
+    if (!isAdmin) {
+      return alert('Solo los administradores pueden registrar nuevos productos o modificar inventario.');
+    }
+
     const nombre = pNombre.trim();
     const stock = parseFloat(pStock);
     const precio = parseFloat(pPrecio) || 0;
     const costo = parseFloat(pCosto) || 0;
+    const codigoBarra = pCodigoBarra.trim();
 
     if (!nombre || isNaN(stock) || stock < 0) {
       return alert('Ingresa nombre y stock válido');
@@ -719,15 +782,26 @@ export default function App() {
     }
 
     if (isGuest) {
-      let p = productos.find((x) => x.nombre.toLowerCase() === nombre.toLowerCase());
+      let p = productos.find(
+        (x) =>
+          (codigoBarra && x.codigoBarra && x.codigoBarra.toLowerCase() === codigoBarra.toLowerCase()) ||
+          x.nombre.toLowerCase() === nombre.toLowerCase()
+      );
       let id = p ? p.id : 'prod_' + Date.now();
       let updatedProds = [...productos];
       if (p) {
-        if (precio) {
-          updatedProds = updatedProds.map((item) => (item.id === id ? { ...item, precio } : item));
-        }
+        updatedProds = updatedProds.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                nombre,
+                precio: precio || item.precio,
+                codigoBarra: codigoBarra || item.codigoBarra,
+              }
+            : item
+        );
       } else {
-        updatedProds.push({ id, nombre, precio });
+        updatedProds.push({ id, nombre, precio, ...(codigoBarra ? { codigoBarra } : {}) });
       }
       setProductos(updatedProds);
       try {
@@ -747,19 +821,31 @@ export default function App() {
       setPStock('');
       setPCosto('');
       setPPrecio('');
+      setPCodigoBarra('');
+      setScannedFeedback(null);
+      showToast(`Stock de "${nombre}" agregado`);
       return;
     }
 
     try {
-      let p = productos.find((x) => x.nombre.toLowerCase() === nombre.toLowerCase());
+      let p = productos.find(
+        (x) =>
+          (codigoBarra && x.codigoBarra && x.codigoBarra.toLowerCase() === codigoBarra.toLowerCase()) ||
+          x.nombre.toLowerCase() === nombre.toLowerCase()
+      );
       let id: string;
       if (p) {
         id = p.id;
-        if (precio) {
-          await updateDoc(doc(db, 'productos', id), { precio });
+        const updateData: Partial<Producto> = {};
+        if (precio) updateData.precio = precio;
+        if (codigoBarra && !p.codigoBarra) updateData.codigoBarra = codigoBarra;
+        if (Object.keys(updateData).length > 0) {
+          await updateDoc(doc(db, 'productos', id), updateData);
         }
       } else {
-        const docRef = await addDoc(collection(db, 'productos'), { nombre, precio });
+        const docData: any = { nombre, precio };
+        if (codigoBarra) docData.codigoBarra = codigoBarra;
+        const docRef = await addDoc(collection(db, 'productos'), docData);
         id = docRef.id;
       }
 
@@ -776,13 +862,18 @@ export default function App() {
       setPStock('');
       setPCosto('');
       setPPrecio('');
+      setPCodigoBarra('');
+      setScannedFeedback(null);
+      showToast(`Stock de "${nombre}" agregado`);
     } catch (e: any) {
       alert('No se pudo guardar: ' + (e?.message || e));
     }
   };
 
-  // Stock Handlers
   const handleOpenEntrada = (id: string) => {
+    if (!isAdmin) {
+      return alert('Solo los administradores pueden registrar entradas de stock.');
+    }
     const p = productos.find((x) => x.id === id);
     if (!p) return;
     setModalEntrada({
@@ -855,6 +946,9 @@ export default function App() {
   };
 
   const handleEliminarProducto = (id: string) => {
+    if (!isAdmin) {
+      return alert('Solo los administradores pueden eliminar productos del catálogo.');
+    }
     const p = productos.find((x) => x.id === id);
     if (!p) return;
     setModalConfirm({
@@ -1962,40 +2056,187 @@ export default function App() {
             {/* VIEW STOCK */}
             {activeTab === 'stock' && (
               <section id="viewStock">
-                <div className="card">
-                  <div className="row">
-                    <input
-                      placeholder="Nombre del producto"
-                      value={pNombre}
-                      onChange={(e) => setPNombre(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Cantidad comprada"
-                      value={pStock}
-                      onChange={(e) => setPStock(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Costo TOTAL de la compra $"
-                      value={pCosto}
-                      onChange={(e) => setPCosto(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Precio de venta unit."
-                      value={pPrecio}
-                      onChange={(e) => setPPrecio(e.target.value)}
-                    />
+                {/* FORMULARIO AGREGAR PRODUCTO (SOLO ADMINS) */}
+                {isAdmin ? (
+                  <div className="card" style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>⚡ Administrar Stock e Ingreso de Productos</span>
+                        </div>
+                        <div className="sub" style={{ fontSize: '0.8rem', marginTop: 2 }}>
+                          Escanea con la cámara o ingresa el código de barra para autocompletar el nombre y evitar errores.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => setScannerOpen(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '8px 14px',
+                          fontSize: '0.86rem',
+                          fontWeight: 700,
+                          background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
+                          boxShadow: '0 4px 14px rgba(37,99,235,0.3)',
+                        }}
+                      >
+                        <span>📷 Escanear con Cámara</span>
+                      </button>
+                    </div>
+
+                    {scannedFeedback && (
+                      <div
+                        style={{
+                          padding: '10px 14px',
+                          borderRadius: 10,
+                          marginBottom: 12,
+                          fontSize: '0.82rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          background:
+                            scannedFeedback.type === 'success'
+                              ? 'rgba(22, 163, 74, 0.12)'
+                              : 'rgba(37, 99, 235, 0.12)',
+                          border: `1px solid ${
+                            scannedFeedback.type === 'success' ? 'rgba(22, 163, 74, 0.35)' : 'rgba(37, 99, 235, 0.35)'
+                          }`,
+                          color: 'var(--text)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: '1.1rem' }}>
+                            {scannedFeedback.type === 'success' ? '✨' : 'ℹ️'}
+                          </span>
+                          <div>{scannedFeedback.msg}</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                          onClick={() => setScannedFeedback(null)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Código de Barra (EAN-13 / UPC):
+                        </label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            placeholder="Ej: 7801610006733"
+                            value={pCodigoBarra}
+                            onChange={(e) => handleBarcodeManualChange(e.target.value)}
+                            style={{ fontSize: '0.86rem' }}
+                          />
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            title="Abrir cámara escáner"
+                            onClick={() => setScannerOpen(true)}
+                            style={{ padding: '0 10px', fontSize: '1rem' }}
+                          >
+                            📷
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Nombre del producto:
+                        </label>
+                        <input
+                          placeholder="Ej: Bebida Score Original 500ml"
+                          value={pNombre}
+                          onChange={(e) => setPNombre(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Cantidad comprada / a sumar:
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 24"
+                          value={pStock}
+                          onChange={(e) => setPStock(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Costo TOTAL de la compra $:
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 21600"
+                          value={pCosto}
+                          onChange={(e) => setPCosto(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Precio de venta unitario $:
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 1500"
+                          value={pPrecio}
+                          onChange={(e) => setPPrecio(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="row" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={handleAgregarProducto}
+                        style={{ padding: '9px 20px', fontWeight: 700 }}
+                      >
+                        + Registrar producto / Entrada
+                      </button>
+                    </div>
                   </div>
-                  <div className="row">
-                    <button className="btn-primary" onClick={handleAgregarProducto}>
-                      + Agregar producto
-                    </button>
+                ) : (
+                  <div
+                    className="card"
+                    style={{
+                      background: 'rgba(37,99,235,0.06)',
+                      border: '1px solid rgba(37,99,235,0.22)',
+                      padding: '14px 18px',
+                      marginBottom: 14,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.96rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>📦 Consulta de Existencias de Stock</span>
+                    </div>
+                    <div className="sub" style={{ marginTop: 4, fontSize: '0.82rem', lineHeight: 1.45 }}>
+                      Aquí puedes revisar las cantidades disponibles para venta y el precio unitario establecido. El ingreso de compras y administración de productos está reservado para los administradores.
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="card" id="listaProductos">
+                  <div style={{ fontWeight: 700, marginBottom: 10, fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Existencias en Stock ({productos.length})</span>
+                    <span className="sub" style={{ fontSize: '0.78rem' }}>Inventario en tiempo real</span>
+                  </div>
                   {productos.length ? (
                     productos.map((p) => {
                       const s = stockDe(p.id, movs);
@@ -2004,46 +2245,79 @@ export default function App() {
                       const gananciaUnit = (p.precio || 0) - cu;
                       return (
                         <div className="item" key={p.id}>
-                          <div>
-                            <div className="name">{p.nombre}</div>
-                            <div className={`amount ${s <= 0 ? 'debt' : 'ok'}`}>
-                              Stock: {s}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span>{p.nombre}</span>
+                              {p.codigoBarra && (
+                                <span
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    background: 'rgba(100,116,139,0.15)',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    fontWeight: 600,
+                                    color: 'var(--sub)',
+                                  }}
+                                >
+                                  🏷 {p.codigoBarra}
+                                </span>
+                              )}
                             </div>
-                            <div className="sub">
-                              Invertido: {fmt(inv)} · Costo unit.: {fmt(cu)}
+                            <div className={`amount ${s <= 0 ? 'debt' : 'ok'}`} style={{ marginTop: 2 }}>
+                              Stock: {s} unid.
                             </div>
-                            <div className="sub">
+                            {isAdmin && (
+                              <div className="sub" style={{ fontSize: '0.78rem' }}>
+                                Invertido: {fmt(inv)} · Costo unit.: {fmt(cu)}
+                              </div>
+                            )}
+                            <div className="sub" style={{ fontSize: '0.78rem' }}>
                               {p.precio ? (
                                 <>
-                                  Venta: {fmt(p.precio)} · Ganancia/unidad:{' '}
-                                  <b className={gananciaUnit >= 0 ? 'ok' : 'debt'}>
-                                    {fmt(gananciaUnit)}
-                                  </b>
+                                  Venta: {fmt(p.precio)}
+                                  {isAdmin && (
+                                    <>
+                                      {' '}· Ganancia/u:{' '}
+                                      <b className={gananciaUnit >= 0 ? 'ok' : 'debt'}>
+                                        {fmt(gananciaUnit)}
+                                      </b>
+                                    </>
+                                  )}
                                 </>
                               ) : (
                                 'Sin precio de venta'
                               )}
                             </div>
                           </div>
-                          <div className="actions">
+                          <div className="actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <button
                               className="btn-red"
                               onClick={() => handleOpenVentaRapida(p.id)}
+                              title="Registrar venta rápida"
+                              style={{ padding: '6px 12px', fontSize: '0.82rem' }}
                             >
                               Venta
                             </button>
-                            <button
-                              className="btn-green"
-                              onClick={() => handleOpenEntrada(p.id)}
-                            >
-                              + Entrada
-                            </button>
-                            <button
-                              className="btn-ghost"
-                              onClick={() => handleEliminarProducto(p.id)}
-                            >
-                              🗑
-                            </button>
+                            {isAdmin && (
+                              <>
+                                <button
+                                  className="btn-green"
+                                  onClick={() => handleOpenEntrada(p.id)}
+                                  title="Registrar entrada de stock"
+                                  style={{ padding: '6px 10px', fontSize: '0.82rem' }}
+                                >
+                                  + Entrada
+                                </button>
+                                <button
+                                  className="btn-ghost"
+                                  onClick={() => handleEliminarProducto(p.id)}
+                                  title="Eliminar producto"
+                                  style={{ padding: '6px 8px', fontSize: '0.82rem' }}
+                                >
+                                  🗑
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -3049,6 +3323,13 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODAL SCANNER DE CÓDIGO DE BARRA */}
+      <BarcodeScannerModal
+        isOpen={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScanSuccess={handleBarcodeScanned}
+      />
 
       {/* TOAST FLOTANTE */}
       {toast && (

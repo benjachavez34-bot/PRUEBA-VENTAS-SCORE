@@ -2,6 +2,7 @@ export interface Producto {
   id: string;
   nombre: string;
   precio?: number;
+  codigoBarra?: string;
 }
 
 export type TipoMovimiento = 'entrada' | 'venta' | 'deuda' | 'pago';
