@@ -180,13 +180,33 @@ export default function App() {
       if (currentUser) {
         setUser(currentUser);
         setIsGuest(false);
-        const name = currentUser.displayName || currentUser.email || 'Socio';
+        const emailLower = (currentUser.email || '').toLowerCase();
+        const isBenja = emailLower === 'benja.chavez34@gmail.com';
+        const name = isBenja
+          ? (currentUser.displayName || 'Benjamín Chávez')
+          : (currentUser.displayName || currentUser.email || 'Socio');
         setMiNombre(name);
         try {
           localStorage.setItem('miNombre', name);
         } catch {}
         setAuthStatus(`Conectado como ${currentUser.email || name}`);
         setDbError(null);
+
+        if (isBenja) {
+          setPerfil((prev) => ({
+            ...prev,
+            nombre: name,
+            email: currentUser.email || 'benja.chavez34@gmail.com',
+            rol: 'Administrador General & Director Comercial',
+          }));
+        } else {
+          setPerfil((prev) => ({
+            ...prev,
+            nombre: name,
+            email: currentUser.email || '',
+            rol: 'Vendedor',
+          }));
+        }
       } else {
         if (!isGuest) {
           setUser(null);
@@ -896,6 +916,17 @@ export default function App() {
     document.title = `${pageTitle} — Ventas Score`;
   }, [pageTitle]);
 
+  // Rol de Administrador exclusivo para la cuenta benja.chavez34@gmail.com
+  const isAdmin = Boolean(
+    user && user.email && user.email.toLowerCase() === 'benja.chavez34@gmail.com'
+  );
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === 'equipo') {
+      setActiveTab('venta');
+    }
+  }, [isAdmin, activeTab]);
+
   const isAuthenticated = Boolean(user || isGuest);
 
   return (
@@ -946,7 +977,7 @@ export default function App() {
         </section>
       ) : (
         <div id="appContent">
-          {/* TOP USER & MI CUENTA BANNER */}
+          {/* TOP USER BANNER */}
           <div
             style={{
               padding: '10px 16px',
@@ -965,71 +996,75 @@ export default function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img
                 src={
-                  perfil.avatarId === 'gorilla'
+                  isAdmin && perfil.avatarId === 'gorilla'
                     ? scoreGorillaLogo
-                    : perfil.avatarId === 'avatar1'
-                    ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
-                    : perfil.avatarId === 'avatar2'
-                    ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
                     : scoreGorillaLogo
                 }
-                alt="Avatar"
+                alt="Logo Score"
                 style={{
                   width: 32,
                   height: 32,
                   borderRadius: '50%',
                   objectFit: 'cover',
                   border: '1.5px solid var(--border)',
-                  boxShadow: '0 0 10px rgba(6, 182, 212, 0.45)',
+                  boxShadow: isAdmin ? '0 0 10px rgba(6, 182, 212, 0.45)' : 'none',
                 }}
                 referrerPolicy="no-referrer"
               />
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>Ventas Score</span>
-                  <span
-                    style={{
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      background: 'var(--accent)',
-                      color: '#fff',
-                      padding: '1px 6px',
-                      borderRadius: 4,
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    👑 Admin
-                  </span>
+                  {isAdmin && (
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        background: 'var(--accent)',
+                        color: '#fff',
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      👑 Admin
+                    </span>
+                  )}
                 </div>
                 <div className="sub" style={{ fontSize: '0.74rem' }}>
-                  {perfil.nombre} · {perfil.rol}
+                  {isAdmin
+                    ? `${perfil.nombre} · ${perfil.rol}`
+                    : isGuest
+                    ? `Modo Local (${miNombre})`
+                    : `Conectado: ${user?.email || miNombre}`}
                 </div>
               </div>
             </div>
 
-            {/* Actions: Mi Cuenta & Logout */}
+            {/* Actions: Mi Cuenta (solo visible para Administrador benja.chavez34@gmail.com) & Logout */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                className="btn-ghost"
-                style={{
-                  padding: '5px 12px',
-                  fontSize: '0.82rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontWeight: 600,
-                  border: '1px solid var(--border)',
-                  background: 'rgba(37,99,235,0.06)',
-                }}
-                onClick={() => {
-                  setEditPerfil(perfil);
-                  setModalCuentaOpen(true);
-                }}
-                title="Configurar perfil, foto y datos personales"
-              >
-                👤 Mi Cuenta
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 600,
+                    border: '1px solid var(--border)',
+                    background: 'rgba(37,99,235,0.06)',
+                  }}
+                  onClick={() => {
+                    setEditPerfil(perfil);
+                    setModalCuentaOpen(true);
+                  }}
+                  title="Configurar perfil de Administrador"
+                >
+                  👤 Mi Cuenta
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-ghost"
@@ -1072,12 +1107,14 @@ export default function App() {
             >
               📊 Estadísticas
             </div>
-            <div
-              className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
-              onClick={() => setActiveTab('equipo')}
-            >
-              🏢 Equipo & Vendedores
-            </div>
+            {isAdmin && (
+              <div
+                className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
+                onClick={() => setActiveTab('equipo')}
+              >
+                🏢 Equipo & Vendedores
+              </div>
+            )}
           </div>
 
           <main>
@@ -1845,8 +1882,8 @@ export default function App() {
               </section>
             )}
 
-            {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL) */}
-            {activeTab === 'equipo' && (
+            {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL - SOLO PARA benja.chavez34@gmail.com) */}
+            {isAdmin && activeTab === 'equipo' && (
               <section id="viewEquipo">
                 <AdminVendedoresView
                   movs={movs}
