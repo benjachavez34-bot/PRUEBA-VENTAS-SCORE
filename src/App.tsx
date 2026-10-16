@@ -199,19 +199,41 @@ export default function App() {
         setDbError(null);
 
         if (isBenja) {
-          setPerfil((prev) => ({
-            ...prev,
-            nombre: name,
-            email: currentUser.email || 'benja.chavez34@gmail.com',
-            rol: 'Administrador General & Director Comercial',
-          }));
+          const savedBenja =
+            localStorage.getItem('perfil_usuario_benja.chavez34@gmail.com') ||
+            localStorage.getItem('perfil_usuario');
+          if (savedBenja) {
+            try {
+              setPerfil(JSON.parse(savedBenja));
+            } catch {}
+          } else {
+            setPerfil((prev) => ({
+              ...prev,
+              nombre: name,
+              email: currentUser.email || 'benja.chavez34@gmail.com',
+              rol: 'Administrador General & Director Comercial',
+            }));
+          }
         } else {
-          setPerfil((prev) => ({
-            ...prev,
-            nombre: name,
-            email: currentUser.email || '',
-            rol: 'Vendedor',
-          }));
+          const userStorageKey = `perfil_usuario_${emailLower}`;
+          let loadedPerfil: PerfilUsuario | null = null;
+          try {
+            const savedSpecific = localStorage.getItem(userStorageKey);
+            if (savedSpecific) loadedPerfil = JSON.parse(savedSpecific);
+          } catch {}
+
+          if (loadedPerfil) {
+            setPerfil(loadedPerfil);
+          } else {
+            setPerfil({
+              nombre: name,
+              email: currentUser.email || '',
+              rol: 'Vendedor',
+              telefono: '',
+              sucursal: 'Ruta Comercial',
+              avatarId: 'avatar2',
+            });
+          }
         }
       } else {
         if (!isGuest) {
@@ -296,6 +318,24 @@ export default function App() {
           (d) => ({ id: d.id, ...(d.data() as Omit<Miembro, 'id'>) })
         );
         setMiembros(list);
+
+        // Si el usuario actual ya está registrado en miembros, actualizar su perfil activo
+        if (user?.email) {
+          const miDoc = list.find(
+            (m) => m.email?.toLowerCase() === user.email?.toLowerCase()
+          );
+          if (miDoc) {
+            setPerfil((prev) => ({
+              ...prev,
+              nombre: miDoc.nombre || prev.nombre,
+              rol: miDoc.rol || prev.rol,
+              telefono: miDoc.telefono || prev.telefono,
+              sucursal: miDoc.sucursal || prev.sucursal,
+              avatarId: miDoc.avatarId || prev.avatarId,
+            }));
+            if (miDoc.nombre) setMiNombre(miDoc.nombre);
+          }
+        }
       },
       (err) => console.log('miembros err', err)
     );
@@ -1110,25 +1150,35 @@ export default function App() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <img
                 src={
-                  isAdmin && perfil.avatarId === 'gorilla'
-                    ? scoreGorillaLogo
+                  perfil.avatarId === 'avatar1'
+                    ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
+                    : perfil.avatarId === 'avatar2'
+                    ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
+                    : perfil.avatarId === 'avatar3'
+                    ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sara'
                     : scoreGorillaLogo
                 }
-                alt="Logo Score"
+                alt="Logo / Avatar"
                 style={{
-                  width: 32,
-                  height: 32,
+                  width: 34,
+                  height: 34,
                   borderRadius: '50%',
                   objectFit: 'cover',
-                  border: '1.5px solid var(--border)',
+                  border: isAdmin ? '2px solid var(--accent)' : '1.5px solid var(--border)',
                   boxShadow: isAdmin ? '0 0 10px rgba(6, 182, 212, 0.45)' : 'none',
+                  cursor: 'pointer',
                 }}
+                onClick={() => {
+                  setEditPerfil(perfil);
+                  setModalCuentaOpen(true);
+                }}
+                title="Configurar mis datos en Mi Cuenta"
                 referrerPolicy="no-referrer"
               />
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>Ventas Score</span>
-                  {isAdmin && (
+                  {isAdmin ? (
                     <span
                       style={{
                         fontSize: '0.68rem',
@@ -1142,43 +1192,55 @@ export default function App() {
                     >
                       👑 Admin
                     </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 600,
+                        background: 'var(--bg)',
+                        color: 'var(--muted)',
+                        border: '1px solid var(--border)',
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                      }}
+                    >
+                      💼 Vendedor
+                    </span>
                   )}
                 </div>
                 <div className="sub" style={{ fontSize: '0.74rem' }}>
                   {isAdmin
                     ? `${perfil.nombre} · ${perfil.rol}`
                     : isGuest
-                    ? `Modo Local (${miNombre})`
-                    : `Conectado: ${user?.email || miNombre}`}
+                    ? `Modo Local (${perfil.nombre || miNombre})`
+                    : `${perfil.nombre || miNombre} · ${perfil.rol || 'Vendedor'}`}
                 </div>
               </div>
             </div>
 
-            {/* Actions: Mi Cuenta (solo visible para Administrador benja.chavez34@gmail.com) & Logout */}
+            {/* Actions: Mi Cuenta (para todos: Administrador y Vendedores) & Logout */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {isAdmin && (
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  style={{
-                    padding: '5px 12px',
-                    fontSize: '0.82rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontWeight: 600,
-                    border: '1px solid var(--border)',
-                    background: 'rgba(37,99,235,0.06)',
-                  }}
-                  onClick={() => {
-                    setEditPerfil(perfil);
-                    setModalCuentaOpen(true);
-                  }}
-                  title="Configurar perfil de Administrador"
-                >
-                  👤 Mi Cuenta
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.82rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  border: '1px solid var(--border)',
+                  background: 'rgba(37,99,235,0.06)',
+                }}
+                onClick={() => {
+                  setEditPerfil(perfil);
+                  setModalCuentaOpen(true);
+                }}
+                title="Abrir Mi Cuenta para editar mi nombre, teléfono, cargo y foto"
+              >
+                👤 Mi Cuenta
+              </button>
               <button
                 type="button"
                 className="btn-ghost"
@@ -1221,12 +1283,18 @@ export default function App() {
             >
               📊 Estadísticas
             </div>
+            <div
+              className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
+              onClick={() => setActiveTab('miembros')}
+            >
+              👥 Miembros & Chat
+            </div>
             {isAdmin && (
               <div
                 className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
                 onClick={() => setActiveTab('equipo')}
               >
-                🏢 Equipo & Vendedores
+                🏢 Supervisión
               </div>
             )}
           </div>
@@ -1996,6 +2064,26 @@ export default function App() {
               </section>
             )}
 
+            {/* VIEW MIEMBROS & CHAT (PARA TODOS: ADMINISTRADOR Y VENDEDORES) */}
+            {activeTab === 'miembros' && (
+              <section id="viewMiembros">
+                <MiembrosChatView
+                  miembros={miembros}
+                  mensajes={mensajes}
+                  nombreActual={perfil.nombre || miNombre}
+                  emailActual={user?.email || perfil.email}
+                  avatarIdActual={perfil.avatarId}
+                  rolActual={perfil.rol}
+                  isAdmin={isAdmin}
+                  onEnviarMensaje={handleEnviarMensaje}
+                  onOpenMiCuenta={() => {
+                    setEditPerfil(perfil);
+                    setModalCuentaOpen(true);
+                  }}
+                />
+              </section>
+            )}
+
             {/* VIEW EQUIPO & VENDEDORES (ADMIN PANEL - SOLO PARA benja.chavez34@gmail.com) */}
             {isAdmin && activeTab === 'equipo' && (
               <section id="viewEquipo">
@@ -2512,13 +2600,13 @@ export default function App() {
                   style={{
                     fontSize: '0.68rem',
                     fontWeight: 700,
-                    background: 'var(--accent)',
+                    background: isAdmin ? 'var(--accent)' : 'var(--accent3)',
                     color: '#fff',
                     padding: '2px 8px',
                     borderRadius: 10,
                   }}
                 >
-                  ADMINISTRADOR
+                  {isAdmin ? 'ADMINISTRADOR' : 'VENDEDOR / MIEMBRO'}
                 </span>
               </div>
               <button
@@ -2545,6 +2633,8 @@ export default function App() {
                       ? 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja'
                       : editPerfil.avatarId === 'avatar2'
                       ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
+                      : editPerfil.avatarId === 'avatar3'
+                      ? 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sara'
                       : scoreGorillaLogo
                   }
                   alt="Avatar"
@@ -2583,6 +2673,14 @@ export default function App() {
                   >
                     💼 Ejecutivo
                   </button>
+                  <button
+                    type="button"
+                    className={editPerfil.avatarId === 'avatar3' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                    onClick={() => setEditPerfil((p) => ({ ...p, avatarId: 'avatar3' }))}
+                  >
+                    🚀 Vendedor
+                  </button>
                 </div>
               </div>
             </div>
@@ -2609,7 +2707,7 @@ export default function App() {
                   type="email"
                   value={editPerfil.email}
                   onChange={(e) => setEditPerfil((p) => ({ ...p, email: e.target.value }))}
-                  placeholder="benja.chavez34@gmail.com"
+                  placeholder="usuario@empresa.com"
                 />
               </div>
 
@@ -2621,7 +2719,7 @@ export default function App() {
                   type="text"
                   value={editPerfil.rol}
                   onChange={(e) => setEditPerfil((p) => ({ ...p, rol: e.target.value }))}
-                  placeholder="Administrador General & Director Comercial"
+                  placeholder={isAdmin ? 'Administrador General & Director Comercial' : 'Vendedor en Ruta'}
                 />
               </div>
 
@@ -2662,16 +2760,7 @@ export default function App() {
               <button
                 type="button"
                 className="btn-green"
-                onClick={() => {
-                  setPerfil(editPerfil);
-                  setMiNombre(editPerfil.nombre);
-                  try {
-                    localStorage.setItem('perfil_usuario', JSON.stringify(editPerfil));
-                    localStorage.setItem('miNombre', editPerfil.nombre);
-                  } catch {}
-                  setModalCuentaOpen(false);
-                  showToast('Datos de cuenta guardados con éxito');
-                }}
+                onClick={() => handleGuardarPerfil(editPerfil)}
               >
                 Guardar cambios
               </button>

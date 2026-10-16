@@ -82,9 +82,9 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
         nombre: nombreActual || 'Vendedor',
         email: emailActual,
         rol: rolActual || 'Vendedor',
-        telefono: '+56 9 1234 5678',
+        telefono: '',
         sucursal: 'Ruta Comercial',
-        avatarId: avatarIdActual || 'gorilla',
+        avatarId: avatarIdActual || 'avatar2',
         isAdmin,
         estado: 'disponible',
       });
@@ -120,6 +120,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     if (avatarId === 'gorilla' || !avatarId) return scoreGorillaLogo;
     if (avatarId === 'avatar1') return 'https://api.dicebear.com/7.x/bottts/svg?seed=Benja';
     if (avatarId === 'avatar2') return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix';
+    if (avatarId === 'avatar3') return 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sara';
     return scoreGorillaLogo;
   };
 
