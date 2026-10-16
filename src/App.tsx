@@ -861,7 +861,7 @@ export default function App() {
       {/* FONDO DE PANTALLA SCORE GORILLA */}
       <div className="score-bg-container" aria-hidden="true">
         <img
-          src="/src/assets/images/score_gorilla_bg_1791923074721.jpg"
+          src="/src/assets/images/score_surtidas_desktop_bg_1792157664500.jpg"
           alt=""
           className="score-bg-img"
           referrerPolicy="no-referrer"
