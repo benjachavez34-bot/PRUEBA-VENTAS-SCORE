@@ -14,9 +14,12 @@ import {
   db,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { Producto, Movimiento, CierreCaja, Deudor, Miembro, MensajeChat } from './types';
 import {
   fTs,
@@ -306,6 +309,20 @@ export default function App() {
     // Inicializar push al cargar la app
     initializePushNotifications();
 
+    // Resolver inicio de sesión por redirección (Android WebView / móvil)
+    getRedirectResult(auth)
+      .then((res) => {
+        if (res?.user) {
+          console.log('[Auth] Autenticado con éxito vía redirección:', res.user.email);
+        }
+      })
+      .catch((err) => {
+        if (err) {
+          console.error('[Auth] Error procesando redirección:', err);
+          setAuthStatus('Error en acceso Google: ' + (err?.message || err));
+        }
+      });
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
@@ -541,9 +558,32 @@ export default function App() {
   // Auth Handlers
   const handleLoginGoogle = async () => {
     try {
+      setAuthStatus('Iniciando sesión con Google...');
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      provider.setCustomParameters({ prompt: 'select_account' });
+
+      // En la app Android (Capacitor nativo), las ventanas emergentes (popups) están bloqueadas por el WebView
+      // signInWithRedirect permite completar el inicio de sesión sin depender de popups
+      if (Capacitor.isNativePlatform()) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        try {
+          await signInWithPopup(auth, provider);
+        } catch (popupErr: any) {
+          // Si el navegador web tiene bloqueador de ventanas emergentes, recurrir a redirect
+          if (
+            popupErr?.code === 'auth/popup-blocked' ||
+            popupErr?.code === 'auth/cancelled-popup-request' ||
+            popupErr?.code === 'auth/operation-not-supported-in-this-environment'
+          ) {
+            await signInWithRedirect(auth, provider);
+          } else {
+            throw popupErr;
+          }
+        }
+      }
     } catch (e: any) {
+      console.error('Error login Google:', e);
       setAuthStatus('No se pudo iniciar sesión: ' + (e?.message || e));
     }
   };
