@@ -10,6 +10,8 @@ interface MiembrosChatViewProps {
   emailActual: string;
   avatarIdActual: string;
   rolActual: string;
+  telefonoActual?: string;
+  sucursalActual?: string;
   isAdmin: boolean;
   onEnviarMensaje: (texto: string, tipo: 'general' | 'indicacion' | 'urgente') => Promise<void>;
   onOpenMiCuenta: () => void;
@@ -32,6 +34,8 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   emailActual,
   avatarIdActual,
   rolActual,
+  telefonoActual,
+  sucursalActual,
   isAdmin,
   onEnviarMensaje,
   onOpenMiCuenta,
@@ -65,50 +69,62 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     const benjaEnLista = miembros.find(
       (m) => m.email?.toLowerCase() === 'benja.chavez34@gmail.com'
     );
-    if (benjaEnLista) {
-      list.push({ ...benjaEnLista, isAdmin: true });
-      emails.add('benja.chavez34@gmail.com');
-    } else {
-      list.push({
-        id: 'admin-benja',
-        nombre: 'Benjamín Chávez',
-        email: 'benja.chavez34@gmail.com',
-        rol: 'Administrador General & Director Comercial',
-        telefono: '+56 9 8765 4321',
-        sucursal: 'Casa Central - Santiago',
-        avatarId: 'gorilla',
-        isAdmin: true,
-        estado: 'disponible',
-      });
-      emails.add('benja.chavez34@gmail.com');
-    }
+    const isMeBenja = emailActual?.toLowerCase() === 'benja.chavez34@gmail.com';
+    const benjaNombre = isMeBenja && nombreActual ? nombreActual : (benjaEnLista?.nombre || 'Benjamín Chávez');
+    const benjaAvatar = (isMeBenja && avatarIdActual) || benjaEnLista?.avatarId || 'gorilla';
+    const benjaTel = (isMeBenja && telefonoActual !== undefined) ? telefonoActual : (benjaEnLista?.telefono || '+56 9 8765 4321');
+    const benjaSucursal = (isMeBenja && sucursalActual) || benjaEnLista?.sucursal || 'Casa Central - Santiago';
+    const benjaRol = (isMeBenja && rolActual) || benjaEnLista?.rol || 'Administrador General & Director Comercial';
+
+    list.push({
+      id: benjaEnLista?.id || 'admin-benja',
+      nombre: benjaNombre,
+      email: 'benja.chavez34@gmail.com',
+      rol: benjaRol,
+      telefono: benjaTel,
+      sucursal: benjaSucursal,
+      avatarId: benjaAvatar,
+      isAdmin: true,
+      estado: 'disponible',
+    });
+    emails.add('benja.chavez34@gmail.com');
 
     // Francisco Inzunza garantizado como Admin
     const fcoEnLista = miembros.find(
       (m) => m.email?.toLowerCase() === 'fco.inzunza.re@gmail.com'
     );
-    if (fcoEnLista) {
-      list.push({ ...fcoEnLista, isAdmin: true });
-      emails.add('fco.inzunza.re@gmail.com');
-    } else {
-      list.push({
-        id: 'admin-fco',
-        nombre: 'Francisco Inzunza',
-        email: 'fco.inzunza.re@gmail.com',
-        rol: 'Administrador General & Socio',
-        telefono: '',
-        sucursal: 'Casa Central - Santiago',
-        avatarId: 'gorilla',
-        isAdmin: true,
-        estado: 'disponible',
-      });
-      emails.add('fco.inzunza.re@gmail.com');
-    }
+    const isMeFco = emailActual?.toLowerCase() === 'fco.inzunza.re@gmail.com';
+    const fcoNombre = isMeFco && nombreActual ? nombreActual : (fcoEnLista?.nombre || 'Francisco Inzunza');
+    const fcoAvatar = (isMeFco && avatarIdActual) || fcoEnLista?.avatarId || 'gorilla';
+    const fcoTel = (isMeFco && telefonoActual !== undefined) ? telefonoActual : (fcoEnLista?.telefono || '');
+    const fcoSucursal = (isMeFco && sucursalActual) || fcoEnLista?.sucursal || 'Casa Central - Santiago';
+    const fcoRol = (isMeFco && rolActual) || fcoEnLista?.rol || 'Administrador General & Socio';
+
+    list.push({
+      id: fcoEnLista?.id || 'admin-fco',
+      nombre: fcoNombre,
+      email: 'fco.inzunza.re@gmail.com',
+      rol: fcoRol,
+      telefono: fcoTel,
+      sucursal: fcoSucursal,
+      avatarId: fcoAvatar,
+      isAdmin: true,
+      estado: 'disponible',
+    });
+    emails.add('fco.inzunza.re@gmail.com');
 
     // Agregar el resto de miembros
     miembros.forEach((m) => {
       if (m.email && !emails.has(m.email.toLowerCase())) {
-        list.push(m);
+        const isCurrent = m.email.toLowerCase() === emailActual?.toLowerCase();
+        list.push({
+          ...m,
+          nombre: isCurrent && nombreActual ? nombreActual : m.nombre,
+          avatarId: isCurrent && avatarIdActual ? avatarIdActual : m.avatarId,
+          telefono: isCurrent && telefonoActual !== undefined ? telefonoActual : m.telefono,
+          rol: isCurrent && rolActual ? rolActual : m.rol,
+          sucursal: isCurrent && sucursalActual ? sucursalActual : m.sucursal,
+        });
         emails.add(m.email.toLowerCase());
       }
     });

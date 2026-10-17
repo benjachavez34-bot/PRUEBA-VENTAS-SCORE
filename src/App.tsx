@@ -570,15 +570,19 @@ export default function App() {
 
         // Si el usuario actual ya está registrado en miembros, actualizar su perfil activo
         if (user?.email) {
-          const miDoc = list.find(
-            (m) => m.email?.toLowerCase() === user.email?.toLowerCase()
-          );
+          const userEmail = user.email.toLowerCase().trim();
+          const matching = list.filter((m) => m.email?.toLowerCase() === userEmail);
+          const miDoc =
+            matching.find((m) => m.id === user.uid) ||
+            matching.find((m) => m.telefono || (m.avatarId && m.avatarId !== 'gorilla')) ||
+            matching[0];
+
           if (miDoc) {
             setPerfil((prev) => ({
               ...prev,
               nombre: miDoc.nombre || prev.nombre,
               rol: miDoc.rol || prev.rol,
-              telefono: miDoc.telefono || prev.telefono,
+              telefono: miDoc.telefono !== undefined && miDoc.telefono !== '' ? miDoc.telefono : prev.telefono,
               sucursal: miDoc.sucursal || prev.sucursal,
               avatarId: miDoc.avatarId || prev.avatarId,
             }));
@@ -685,11 +689,79 @@ export default function App() {
   };
 
   // Helper: Vincular usuario en base de datos Firestore (usuarios y miembros)
-  const vincularUsuarioEnBD = async (u: User | { uid: string; email?: string | null; displayName?: string | null }, nombreCustom?: string) => {
+  const vincularUsuarioEnBD = async (
+    u: User | { uid: string; email?: string | null; displayName?: string | null },
+    nombreCustom?: string,
+    perfilOverride?: Partial<PerfilUsuario>
+  ) => {
     try {
       const emailLower = (u.email || '').toLowerCase().trim();
       const isAdminUser = isUserAdmin(emailLower);
-      const nombreFinal = nombreCustom || u.displayName || (isAdminUser ? 'Administrador' : 'Vendedor');
+      const isBenja = emailLower === 'benja.chavez34@gmail.com';
+      const isFco = emailLower === 'fco.inzunza.re@gmail.com';
+
+      // Consultar si ya existe el miembro en Firestore para preservar su foto y teléfono
+      let existing: Partial<Miembro> | null = null;
+      try {
+        const snapMiembro = await getDoc(doc(db, 'miembros', u.uid));
+        if (snapMiembro.exists()) {
+          existing = snapMiembro.data() as Partial<Miembro>;
+        } else if (emailLower) {
+          const emailDocId = emailLower.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const snapEmail = await getDoc(doc(db, 'miembros', emailDocId));
+          if (snapEmail.exists()) existing = snapEmail.data() as Partial<Miembro>;
+        }
+      } catch (errSnap) {
+        console.warn('[BD] Consulta previa omitida:', errSnap);
+      }
+
+      // Obtener datos locales si existen
+      let localSaved: Partial<PerfilUsuario> | null = null;
+      try {
+        const raw =
+          localStorage.getItem(`perfil_usuario_${emailLower}`) ||
+          (isBenja ? localStorage.getItem('perfil_usuario') : null);
+        if (raw) localSaved = JSON.parse(raw);
+      } catch {}
+
+      const nombreFinal =
+        perfilOverride?.nombre ||
+        nombreCustom ||
+        existing?.nombre ||
+        localSaved?.nombre ||
+        u.displayName ||
+        (isBenja ? 'Benjamín Chávez' : isFco ? 'Francisco Inzunza' : 'Vendedor');
+
+      const avatarFinal =
+        perfilOverride?.avatarId ||
+        existing?.avatarId ||
+        localSaved?.avatarId ||
+        (isAdminUser ? 'gorilla' : 'avatar2');
+
+      const telefonoFinal =
+        perfilOverride?.telefono !== undefined
+          ? perfilOverride.telefono
+          : existing?.telefono !== undefined
+          ? existing.telefono
+          : localSaved?.telefono !== undefined
+          ? localSaved.telefono
+          : (isBenja ? '+56 9 8765 4321' : '');
+
+      const rolFinal =
+        perfilOverride?.rol ||
+        existing?.rol ||
+        localSaved?.rol ||
+        (isBenja
+          ? 'Administrador General & Director Comercial'
+          : isFco
+          ? 'Administrador General & Socio'
+          : 'Vendedor');
+
+      const sucursalFinal =
+        perfilOverride?.sucursal ||
+        existing?.sucursal ||
+        localSaved?.sucursal ||
+        (isAdminUser ? 'Casa Central - Santiago' : 'Ruta Comercial');
 
       // 1. Colección usuarios
       await setDoc(
@@ -698,33 +770,61 @@ export default function App() {
           uid: u.uid,
           email: emailLower,
           nombre: nombreFinal,
-          rol: isAdminUser ? 'Administrador General' : 'Vendedor',
-          avatarId: isAdminUser ? 'gorilla' : 'avatar2',
-          creadoEn: new Date().toISOString(),
-          ultimoAcceso: new Date().toISOString(),
+          rol: rolFinal,
+          telefono: telefonoFinal,
+          sucursal: sucursalFinal,
+          avatarId: avatarFinal,
+          isAdmin: isAdminUser,
           activo: true,
+          ultimoAcceso: new Date().toISOString(),
         },
         { merge: true }
       );
 
-      // 2. Colección miembros para chat y equipo
+      // 2. Colección miembros para chat y equipo (por UID)
       await setDoc(
         doc(db, 'miembros', u.uid),
         {
           id: u.uid,
           nombre: nombreFinal,
           email: emailLower,
-          rol: isAdminUser ? 'Administrador General' : 'Vendedor',
+          rol: rolFinal,
           isAdmin: isAdminUser,
-          avatarId: isAdminUser ? 'gorilla' : 'avatar2',
-          sucursal: isAdminUser ? 'Casa Central - Santiago' : 'Ruta Comercial',
+          avatarId: avatarFinal,
+          telefono: telefonoFinal,
+          sucursal: sucursalFinal,
           estado: 'disponible',
           ultimoIngreso: Date.now(),
+          ultimaActividad: Date.now(),
         },
         { merge: true }
       );
 
-      console.log('[BD] Usuario vinculado exitosamente a Firestore:', emailLower);
+      // Si existía un documento histórico con formato email_id, sincronizarlo
+      const emailDocId = emailLower.replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (emailDocId && emailDocId !== u.uid) {
+        try {
+          await setDoc(
+            doc(db, 'miembros', emailDocId),
+            {
+              id: u.uid,
+              nombre: nombreFinal,
+              email: emailLower,
+              rol: rolFinal,
+              isAdmin: isAdminUser,
+              avatarId: avatarFinal,
+              telefono: telefonoFinal,
+              sucursal: sucursalFinal,
+              estado: 'disponible',
+              ultimoIngreso: Date.now(),
+              ultimaActividad: Date.now(),
+            },
+            { merge: true }
+          );
+        } catch {}
+      }
+
+      console.log('[BD] Usuario vinculado exitosamente preservando datos:', emailLower);
     } catch (err) {
       console.error('[BD] Error vinculando usuario en Firestore:', err);
     }
@@ -963,11 +1063,21 @@ export default function App() {
         if (isCurrentAdmin) localStorage.setItem('sesion_activa_rol', 'admin');
       } catch {}
 
+      if (auth.currentUser) {
+        try {
+          await auth.currentUser.getIdToken(true);
+        } catch {}
+      }
+
       setSavedSession(sessionObj);
       setIsLocked(false);
       setUser(u || ({ uid: finalUid, email: finalEmail, displayName: finalNombre } as User));
       setIsGuest(false);
       setMiNombre(finalNombre);
+      setLoginView('main');
+      setPendingUser(null);
+      setExpectedOtpCode('');
+      setDbError(null);
 
       showToast('¡Cuenta verificada y vinculada a la base de datos!');
     } catch (err: any) {
@@ -1861,13 +1971,27 @@ export default function App() {
   const handleGuardarPerfil = async (nuevoPerfil: PerfilUsuario) => {
     setPerfil(nuevoPerfil);
     setMiNombre(nuevoPerfil.nombre);
+    const emailLower = (user?.email || nuevoPerfil.email || '').toLowerCase().trim();
     try {
       localStorage.setItem('perfil_usuario', JSON.stringify(nuevoPerfil));
+      if (emailLower) {
+        localStorage.setItem(`perfil_usuario_${emailLower}`, JSON.stringify(nuevoPerfil));
+      }
       localStorage.setItem('miNombre', nuevoPerfil.nombre);
+
+      // Actualizar sesión guardada
+      const rawSession = localStorage.getItem('saved_user_session');
+      if (rawSession) {
+        const s = JSON.parse(rawSession);
+        s.nombre = nuevoPerfil.nombre;
+        s.avatarId = nuevoPerfil.avatarId;
+        localStorage.setItem('saved_user_session', JSON.stringify(s));
+        setSavedSession(s);
+      }
     } catch {}
 
     const miembroData: Omit<Miembro, 'id'> = {
-      email: user?.email || nuevoPerfil.email || '',
+      email: emailLower,
       nombre: nuevoPerfil.nombre,
       rol: nuevoPerfil.rol,
       telefono: nuevoPerfil.telefono,
@@ -1880,7 +2004,7 @@ export default function App() {
 
     if (isGuest) {
       setMiembros((prev) => {
-        const filtered = prev.filter((m) => m.email !== miembroData.email);
+        const filtered = prev.filter((m) => m.email?.toLowerCase() !== emailLower);
         const updated = [...filtered, { id: 'local-' + Date.now(), ...miembroData }];
         try {
           localStorage.setItem('local_miembros', JSON.stringify(updated));
@@ -1893,11 +2017,39 @@ export default function App() {
     }
 
     try {
-      const emailDocId = (user?.email || nuevoPerfil.email || 'usuario').replace(/[^a-zA-Z0-9_-]/g, '_');
-      await setDoc(doc(db, 'miembros', emailDocId), miembroData, { merge: true });
+      // 1. Guardar con u.uid como documento principal
+      const docId = user?.uid || emailLower.replace(/[^a-zA-Z0-9_-]/g, '_');
+      await setDoc(doc(db, 'miembros', docId), { ...miembroData, id: docId }, { merge: true });
+
+      // 2. Guardar también en usuarios/{docId}
+      await setDoc(
+        doc(db, 'usuarios', docId),
+        {
+          uid: docId,
+          email: emailLower,
+          nombre: nuevoPerfil.nombre,
+          rol: nuevoPerfil.rol,
+          telefono: nuevoPerfil.telefono,
+          sucursal: nuevoPerfil.sucursal,
+          avatarId: nuevoPerfil.avatarId,
+          isAdmin,
+          actualizadoEn: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      // 3. Sincronizar documento con formato email_id si existe
+      const emailDocId = emailLower.replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (emailDocId && emailDocId !== docId) {
+        try {
+          await setDoc(doc(db, 'miembros', emailDocId), { ...miembroData, id: docId }, { merge: true });
+        } catch {}
+      }
+
       setModalCuentaOpen(false);
-      showToast('Perfil actualizado y sincronizado en Miembros');
+      showToast('✓ Perfil, foto y teléfono guardados exitosamente');
     } catch (e: any) {
+      console.error('Error guardando perfil:', e);
       setModalCuentaOpen(false);
       showToast('Perfil guardado');
     }
@@ -2267,7 +2419,7 @@ export default function App() {
             </div>
           </section>
         </div>
-      ) : !isAuthenticated ? (
+      ) : (!isAuthenticated || loginView === 'verify_email') ? (
         /* PANTALLA DE ACCESO INICIAL (GOOGLE / CORREO / INVITADO) */
         <div className="auth-wrapper">
           <section id="authPanel" className="auth-card" style={{ maxWidth: 380, width: '92%' }}>
@@ -3853,6 +4005,8 @@ export default function App() {
                   emailActual={user?.email || perfil.email}
                   avatarIdActual={perfil.avatarId}
                   rolActual={perfil.rol}
+                  telefonoActual={perfil.telefono}
+                  sucursalActual={perfil.sucursal}
                   isAdmin={isAdmin}
                   onEnviarMensaje={handleEnviarMensaje}
                   onOpenMiCuenta={() => {
