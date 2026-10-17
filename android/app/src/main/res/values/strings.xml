@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ventas Score</string>
+    <string name="title_activity_main">Ventas Score</string>
+    <string name="package_name">com.ventasscore.app</string>
+    <string name="custom_url_scheme">com.ventasscore.app</string>
+</resources>

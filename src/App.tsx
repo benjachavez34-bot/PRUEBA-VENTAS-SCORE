@@ -36,6 +36,7 @@ import { AyudaView } from './components/AyudaView';
 import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
+import { initializePushNotifications } from './utils/pushNotifications';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
@@ -249,10 +250,14 @@ export default function App() {
 
   // Listen to Auth
   useEffect(() => {
+    // Inicializar push al cargar la app
+    initializePushNotifications();
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
         setIsGuest(false);
+        initializePushNotifications(currentUser.uid);
         const emailLower = (currentUser.email || '').toLowerCase().trim();
         const isCurrentAdmin = isUserAdmin(emailLower);
         const isBenja = emailLower === 'benja.chavez34@gmail.com';

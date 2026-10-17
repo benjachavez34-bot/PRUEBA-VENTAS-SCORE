@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "363479878821",
+    "firebase_url": "https://ventas-score-default-rtdb.firebaseio.com",
+    "project_id": "ventas-score",
+    "storage_bucket": "ventas-score.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:363479878821:android:b0595f5b6b8675d3d6914c",
+        "android_client_info": {
+          "package_name": "com.ventasscore.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "363479878821-u4qovu0ic4dib9n62pvvn4dod2r9npak.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWipkSFnNRTkcD25ImS9XAEyOHUR5ACfE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "363479878821-u4qovu0ic4dib9n62pvvn4dod2r9npak.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
