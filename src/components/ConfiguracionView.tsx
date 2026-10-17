@@ -7,6 +7,8 @@ export interface ThemeConfig {
   customBgUrl: string | null;
   mode: 'dark' | 'light' | 'auto';
   nombreEmpresa: string;
+  cardOpacity?: number; // 0.15 a 0.95
+  bgOpacity?: number;   // 0.15 a 0.95
 }
 
 interface ConfiguracionViewProps {
@@ -114,6 +116,18 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
     onSaveTheme(actualizado);
     if (fileInputRef.current) fileInputRef.current.value = '';
     mostrarMensaje('Fondo restablecido al original de Score');
+  };
+
+  const handleCardOpacityChange = (val: number) => {
+    const actualizado = { ...tema, cardOpacity: val };
+    setTema(actualizado);
+    onSaveTheme(actualizado);
+  };
+
+  const handleBgOpacityChange = (val: number) => {
+    const actualizado = { ...tema, bgOpacity: val };
+    setTema(actualizado);
+    onSaveTheme(actualizado);
   };
 
   return (
@@ -325,6 +339,134 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
               Restablecer fondo original
             </button>
           )}
+        </div>
+      </div>
+
+      {/* SECCIÓN 3: TRANSPARENCIA DE BANNERS, TARJETAS Y FONDO */}
+      <div className="card" style={{ padding: '16px', margin: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: '0.98rem', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>✨</span> Transparencia de Banners y Fondo
+        </div>
+        <div className="sub" style={{ marginBottom: 14, fontSize: '0.82rem' }}>
+          Haz los banners, menús y tarjetas más transparentes con efecto glassmorphism para que tu foto de fondo se aprecie con total claridad.
+        </div>
+
+        {/* Control 1: Opacidad / Transparencia de Banners y Tarjetas */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>
+              Transparencia de Banners y Tarjetas
+            </span>
+            <span
+              style={{
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                color: 'var(--accent)',
+                background: 'rgba(var(--card-rgb), 0.5)',
+                padding: '2px 8px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+              }}
+            >
+              {Math.round((1 - (tema.cardOpacity ?? 0.60)) * 100)}% transparente
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', width: 45 }}>Cristal</span>
+            <input
+              type="range"
+              min="0.15"
+              max="0.95"
+              step="0.05"
+              value={tema.cardOpacity ?? 0.60}
+              onChange={(e) => handleCardOpacityChange(parseFloat(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', width: 45, textAlign: 'right' }}>Sólido</span>
+          </div>
+
+          {/* Presets rápidos de transparencia */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {[
+              { label: '💎 Cristal (75%)', val: 0.25 },
+              { label: '✨ Glass (50%)', val: 0.50 },
+              { label: '⚖️ Recomendado (40%)', val: 0.60 },
+              { label: '🛡️ Sólido (10%)', val: 0.90 },
+            ].map((preset) => {
+              const activo = Math.abs((tema.cardOpacity ?? 0.60) - preset.val) < 0.04;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className={activo ? 'btn-primary' : 'btn-ghost'}
+                  style={{ padding: '5px 10px', fontSize: '0.76rem', borderRadius: 6 }}
+                  onClick={() => handleCardOpacityChange(preset.val)}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Control 2: Nitidez / Opacidad de la foto de fondo */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>
+              Intensidad / Nitidez del fondo
+            </span>
+            <span
+              style={{
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                color: 'var(--accent)',
+                background: 'rgba(var(--card-rgb), 0.5)',
+                padding: '2px 8px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+              }}
+            >
+              {Math.round((tema.bgOpacity ?? 0.45) * 100)}% visibilidad
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', width: 45 }}>Tenue</span>
+            <input
+              type="range"
+              min="0.15"
+              max="0.95"
+              step="0.05"
+              value={tema.bgOpacity ?? 0.45}
+              onChange={(e) => handleBgOpacityChange(parseFloat(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--muted)', width: 45, textAlign: 'right' }}>Vibrante</span>
+          </div>
+
+          {/* Presets rápidos de fondo */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {[
+              { label: 'Suave (25%)', val: 0.25 },
+              { label: 'Equilibrado (45%)', val: 0.45 },
+              { label: 'Vívido (65%)', val: 0.65 },
+              { label: 'Máximo (85%)', val: 0.85 },
+            ].map((preset) => {
+              const activo = Math.abs((tema.bgOpacity ?? 0.45) - preset.val) < 0.04;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className={activo ? 'btn-primary' : 'btn-ghost'}
+                  style={{ padding: '5px 10px', fontSize: '0.76rem', borderRadius: 6 }}
+                  onClick={() => handleBgOpacityChange(preset.val)}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

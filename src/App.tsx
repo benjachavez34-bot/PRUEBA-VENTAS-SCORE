@@ -94,6 +94,8 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.style.setProperty('--accent', themeConfig.accentColor);
+    document.documentElement.style.setProperty('--card-opacity', String(themeConfig.cardOpacity ?? 0.60));
+    document.documentElement.style.setProperty('--bg-opacity', String(themeConfig.bgOpacity ?? 0.45));
     if (themeConfig.mode === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
     } else if (themeConfig.mode === 'light') {
@@ -116,6 +118,8 @@ export default function App() {
       customBgUrl: null,
       mode: 'auto',
       nombreEmpresa: 'Ventas Score',
+      cardOpacity: 0.60,
+      bgOpacity: 0.45,
     };
     setThemeConfig(defaultTheme);
     try {
@@ -1267,7 +1271,7 @@ export default function App() {
             position: 'absolute',
             inset: 0,
             background:
-              'radial-gradient(circle at center, transparent 35%, var(--bg) 95%)',
+              'radial-gradient(circle at center, transparent 40%, rgba(var(--bg-rgb, 17, 19, 23), 0.65) 100%)',
           }}
         />
       </div>
@@ -1421,7 +1425,8 @@ export default function App() {
               justifyContent: 'space-between',
               alignItems: 'center',
               fontSize: '0.85rem',
-              backdropFilter: 'blur(8px)',
+              backdropFilter: 'blur(var(--blur, 14px))',
+              WebkitBackdropFilter: 'blur(var(--blur, 14px))',
               flexWrap: 'wrap',
               gap: 8,
             }}
