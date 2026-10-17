@@ -11,6 +11,9 @@ import {
   signInAnonymously,
   updateProfile,
   signOut,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
@@ -39,4 +42,7 @@ export {
   signInAnonymously,
   updateProfile,
   signOut,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
 };

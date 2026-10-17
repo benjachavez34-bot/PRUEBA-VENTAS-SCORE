@@ -41,6 +41,12 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   const [tipoMensaje, setTipoMensaje] = useState<'general' | 'indicacion' | 'urgente'>('general');
   const [enviando, setEnviando] = useState<boolean>(false);
   const [filtroTexto, setFiltroTexto] = useState<string>('');
+  const [permisoNotif, setPermisoNotif] = useState<NotificationPermission | null>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return null;
+  });
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll al final del chat cuando llegan nuevos mensajes
@@ -390,6 +396,49 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
               Espacio oficial para que la administración (Benjamín) comunique metas, cambios de ruta, alertas de stock y para que el equipo reporte novedades en tiempo real.
             </div>
           </div>
+
+          {/* AVISO DE ACTIVACIÓN DE NOTIFICACIONES */}
+          {permisoNotif === 'default' && (
+            <div
+              className="card"
+              style={{
+                padding: '10px 14px',
+                margin: 0,
+                background: 'rgba(37,99,235,0.08)',
+                border: '1px solid var(--accent)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '1.2rem' }}>🔔</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.84rem' }}>
+                    Activa las notificaciones de chat
+                  </div>
+                  <div className="sub" style={{ fontSize: '0.74rem' }}>
+                    Recibe alertas y sonido cuando un compañero o la administración envíe un mensaje.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ fontSize: '0.78rem', padding: '6px 12px' }}
+                onClick={async () => {
+                  if (typeof window !== 'undefined' && 'Notification' in window) {
+                    const p = await Notification.requestPermission();
+                    setPermisoNotif(p);
+                  }
+                }}
+              >
+                Activar notificaciones
+              </button>
+            </div>
+          )}
 
           {/* CAJA DE MENSAJES */}
           <div

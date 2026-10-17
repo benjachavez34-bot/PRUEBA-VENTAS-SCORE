@@ -9,6 +9,8 @@ import {
   onSnapshot,
   getDocs,
   getDoc,
+  query,
+  where,
 } from 'firebase/firestore';
 import {
   auth,
@@ -23,6 +25,7 @@ import {
   signInAnonymously,
   updateProfile,
   signOut,
+  deleteUser,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
@@ -45,7 +48,11 @@ import { AyudaView } from './components/AyudaView';
 import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
-import { initializePushNotifications } from './utils/pushNotifications';
+import {
+  initializePushNotifications,
+  showBrowserNotification,
+  registrarPushParaDispositivos,
+} from './utils/pushNotifications';
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
@@ -242,6 +249,9 @@ export default function App() {
 
   // Estado de Mi Cuenta (Perfil)
   const [modalCuentaOpen, setModalCuentaOpen] = useState<boolean>(false);
+  const [modalEliminarCuentaOpen, setModalEliminarCuentaOpen] = useState<boolean>(false);
+  const [confirmarEliminarTexto, setConfirmarEliminarTexto] = useState<string>('');
+  const [eliminandoCuenta, setEliminandoCuenta] = useState<boolean>(false);
   const [perfil, setPerfil] = useState<PerfilUsuario>(() => {
     try {
       const saved = localStorage.getItem('perfil_usuario');
@@ -588,19 +598,15 @@ export default function App() {
         list.sort((a, b) => a.ts - b.ts);
         setMensajes(list);
 
-        // Notificación de mensajes nuevos en tiempo real si proviene de otro usuario
+        // Notificación de mensajes nuevos en tiempo real con sonido, parpadeo de pestaña y Service Worker
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const newMsg = change.doc.data() as MensajeChat;
-            if (newMsg && newMsg.deEmail !== user?.email && Date.now() - (newMsg.ts || 0) < 25000) {
-              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                try {
-                  new Notification(`💬 ${newMsg.deNombre || 'Compañero'}:`, {
-                    body: newMsg.texto,
-                    icon: '/icon-192.png',
-                  });
-                } catch {}
-              }
+            if (newMsg && newMsg.deEmail !== user?.email && Date.now() - (newMsg.ts || 0) < 30000) {
+              showBrowserNotification(
+                `💬 ${newMsg.deNombre || 'Compañero'}:`,
+                newMsg.texto || 'Nuevo mensaje en Ventas Score'
+              );
             }
           }
         });
@@ -616,6 +622,23 @@ export default function App() {
       unsubMensajes();
     };
   }, [user, isGuest]);
+
+  // Navegación automática si se hace clic en la notificación del Service Worker
+  useEffect(() => {
+    const handleSwMsg = (event: MessageEvent) => {
+      if (event.data?.type === 'NAVIGATE_TAB' && event.data?.tab) {
+        setActiveTab(event.data.tab);
+      }
+    };
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMsg);
+    }
+    return () => {
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMsg);
+      }
+    };
+  }, []);
 
   // Clients list for datalist suggestions
   const clientNames = useMemo(() => {
@@ -1822,6 +1845,13 @@ export default function App() {
 
     try {
       await addDoc(collection(db, 'mensajes'), msgData);
+      // Encolar notificación push para teléfonos con la app cerrada
+      registrarPushParaDispositivos(
+        `💬 ${perfil.nombre || miNombre}:`,
+        msgData.texto,
+        user?.uid,
+        user?.email || perfil.email
+      );
       showToast(isAdmin ? 'Indicación oficial enviada al equipo' : 'Mensaje enviado');
     } catch (e: any) {
       alert('No se pudo enviar el mensaje: ' + (e?.message || e));
@@ -1870,6 +1900,99 @@ export default function App() {
     } catch (e: any) {
       setModalCuentaOpen(false);
       showToast('Perfil guardado');
+    }
+  };
+
+  const handleEliminarMiCuenta = async () => {
+    try {
+      setEliminandoCuenta(true);
+      const currentUser = auth.currentUser;
+      const uid = currentUser?.uid || user?.uid;
+      const userEmail = currentUser?.email || user?.email || perfil.email;
+
+      // 1. Borrar registro de 'miembros' en Firestore
+      if (uid) {
+        try {
+          await deleteDoc(doc(db, 'miembros', uid));
+        } catch (e) {
+          console.warn('Error borrando miembro por uid:', e);
+        }
+      }
+      if (userEmail) {
+        try {
+          const emailDocId = userEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+          await deleteDoc(doc(db, 'miembros', emailDocId));
+          const snapMiembros = await getDocs(
+            query(collection(db, 'miembros'), where('email', '==', userEmail))
+          );
+          for (const d of snapMiembros.docs) {
+            await deleteDoc(doc(db, 'miembros', d.id));
+          }
+        } catch (e) {
+          console.warn('Error borrando miembros por email:', e);
+        }
+      }
+
+      // 2. Borrar registro de 'usuarios' en Firestore
+      if (uid) {
+        try {
+          await deleteDoc(doc(db, 'usuarios', uid));
+        } catch (e) {
+          console.warn('Error borrando usuario por uid:', e);
+        }
+      }
+
+      // 3. Borrar tokens de notificación del usuario
+      if (uid || userEmail) {
+        try {
+          const snapTokens = await getDocs(collection(db, 'fcm_tokens'));
+          for (const d of snapTokens.docs) {
+            const dt = d.data();
+            if (dt.userId === uid || dt.userId === userEmail) {
+              await deleteDoc(doc(db, 'fcm_tokens', d.id));
+            }
+          }
+        } catch (e) {
+          console.warn('Error borrando fcm_tokens:', e);
+        }
+      }
+
+      // IMPORTANTE: NO SE BORRAN 'ventas', 'cierres', 'movimientos' ni 'mensajes'
+      // para preservar la contabilidad, comisiones y trazabilidad histórica de la empresa.
+
+      // 4. Borrar cuenta en Firebase Authentication
+      if (currentUser) {
+        try {
+          await deleteUser(currentUser);
+        } catch (authErr: any) {
+          console.warn('deleteUser auth error (requiere relogin o fue invitado):', authErr);
+        }
+      }
+
+      // 5. Limpiar almacenamiento local
+      try {
+        localStorage.removeItem('ventas_score_saved_session');
+        localStorage.removeItem('perfil_usuario');
+        localStorage.removeItem('auth_user');
+        localStorage.removeItem('miNombre');
+        localStorage.removeItem('sesion_activa_rol');
+        localStorage.removeItem('pin_rapido_desbloqueo');
+      } catch {}
+
+      // 6. Cerrar sesión y resetear estados
+      await signOut(auth);
+      setUser(null);
+      setIsGuest(false);
+      setSavedSession(null);
+      setIsLocked(false);
+      setModalEliminarCuentaOpen(false);
+      setModalCuentaOpen(false);
+
+      showToast('Tu cuenta ha sido eliminada exitosamente. Las ventas y mensajes históricos se han conservado.');
+    } catch (err: any) {
+      alert('Error al eliminar cuenta: ' + (err?.message || err));
+    } finally {
+      setEliminandoCuenta(false);
     }
   };
 
@@ -4489,6 +4612,71 @@ export default function App() {
               </div>
             </div>
 
+            {/* ZONA DE PELIGRO: ELIMINAR CUENTA (DISPONIBLE PARA TODOS LOS USUARIOS) */}
+            <div
+              style={{
+                marginTop: 20,
+                padding: '12px 14px',
+                borderRadius: 10,
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                background: 'rgba(239, 68, 68, 0.05)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '0.86rem',
+                      color: '#ef4444',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>⚠️</span>
+                    <span>Zona de Peligro</span>
+                  </div>
+                  <div
+                    className="sub"
+                    style={{
+                      fontSize: '0.74rem',
+                      marginTop: 2,
+                      maxWidth: 320,
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    Eliminar tu cuenta removerá tu perfil y acceso. Tus ventas y mensajes históricos se conservarán intactos.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  style={{
+                    fontSize: '0.78rem',
+                    padding: '6px 12px',
+                    fontWeight: 700,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => {
+                    setConfirmarEliminarTexto('');
+                    setModalEliminarCuentaOpen(true);
+                  }}
+                >
+                  🗑️ Eliminar cuenta
+                </button>
+              </div>
+            </div>
+
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
@@ -4503,6 +4691,116 @@ export default function App() {
                 onClick={() => handleGuardarPerfil(editPerfil)}
               >
                 Guardar cambios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMACIÓN PARA ELIMINAR CUENTA */}
+      {modalEliminarCuentaOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100,
+            padding: 16,
+          }}
+          onClick={() => !eliminandoCuenta && setModalEliminarCuentaOpen(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 440,
+              width: '100%',
+              margin: 0,
+              border: '2px solid #ef4444',
+              boxShadow: '0 16px 40px rgba(239, 68, 68, 0.3)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: '1.8rem' }}>⚠️</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#ef4444', fontWeight: 800 }}>
+                  ¿Eliminar tu cuenta definitivamente?
+                </h3>
+                <span className="sub" style={{ fontSize: '0.76rem' }}>
+                  Esta acción es irreversible para tu usuario
+                </span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'var(--bg)',
+                padding: 12,
+                borderRadius: 8,
+                fontSize: '0.82rem',
+                marginBottom: 14,
+                lineHeight: 1.45,
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ marginBottom: 8, fontWeight: 700, color: 'var(--text)' }}>
+                Lo que sucederá al confirmar:
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-sub)' }}>
+                <li style={{ marginBottom: 4 }}>
+                  ❌ <strong>Tu acceso</strong> al sistema será eliminado permanentemente.
+                </li>
+                <li style={{ marginBottom: 4 }}>
+                  ❌ <strong>Tu registro de Miembro</strong> del equipo se borrará.
+                </li>
+                <li style={{ marginBottom: 4, color: 'var(--accent3)', fontWeight: 600 }}>
+                  ✅ <strong>Tus ventas y cierres</strong> registrados se <u>conservarán intactos</u> en las métricas de la empresa.
+                </li>
+                <li style={{ color: 'var(--accent3)', fontWeight: 600 }}>
+                  ✅ <strong>Tus mensajes</strong> en el chat se <u>mantendrán</u> con tu nombre en el historial.
+                </li>
+              </ul>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label className="sub" style={{ display: 'block', marginBottom: 6, fontSize: '0.8rem', fontWeight: 600 }}>
+                Para confirmar, escribe la palabra <strong style={{ color: '#ef4444' }}>ELIMINAR</strong>:
+              </label>
+              <input
+                type="text"
+                value={confirmarEliminarTexto}
+                onChange={(e) => setConfirmarEliminarTexto(e.target.value)}
+                placeholder="ELIMINAR"
+                style={{
+                  width: '100%',
+                  borderColor: confirmarEliminarTexto.toUpperCase() === 'ELIMINAR' ? '#ef4444' : undefined,
+                  fontWeight: 'bold',
+                  letterSpacing: '1px',
+                }}
+                disabled={eliminandoCuenta}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalEliminarCuentaOpen(false)}
+                disabled={eliminandoCuenta}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={confirmarEliminarTexto.trim().toUpperCase() !== 'ELIMINAR' || eliminandoCuenta}
+                onClick={handleEliminarMiCuenta}
+                style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                {eliminandoCuenta ? 'Eliminando...' : 'Sí, eliminar mi cuenta'}
               </button>
             </div>
           </div>

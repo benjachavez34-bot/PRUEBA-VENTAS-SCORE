@@ -25,7 +25,7 @@ self.addEventListener('push', (event) => {
     body: data.notification?.body || data.body || 'Nueva actualización registrada en Ventas Score',
     icon: './icon-192.png',
     badge: './apple-touch-icon.png',
-    vibrate: [100, 50, 100],
+    vibrate: [200, 100, 200],
     data: data.data || {},
   };
 
@@ -36,10 +36,15 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      if (clientList.length > 0) {
-        return clientList[0].focus();
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.postMessage({ type: 'NAVIGATE_TAB', tab: 'miembros' });
+          return client.focus();
+        }
       }
-      return self.clients.openWindow('./');
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('./');
+      }
     })
   );
 });
