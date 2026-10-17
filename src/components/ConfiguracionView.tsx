@@ -71,8 +71,8 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1600;
-        const MAX_HEIGHT = 1200;
+        const MAX_WIDTH = 1280;
+        const MAX_HEIGHT = 900;
         let width = img.width;
         let height = img.height;
 
@@ -93,11 +93,11 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
           const actualizado = { ...tema, customBgUrl: compressedDataUrl };
           setTema(actualizado);
           onSaveTheme(actualizado);
-          mostrarMensaje('Foto de fondo actualizada correctamente');
+          mostrarMensaje('Foto de fondo actualizada y sincronizada para todos los usuarios');
         }
         setCargandoImagen(false);
       };
@@ -177,7 +177,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
             </span>
           </div>
           <div className="sub" style={{ fontSize: '0.8rem', marginTop: 3 }}>
-            Personaliza los colores, fondo de pantalla y preferencias visuales de la aplicación.
+            Personaliza colores, fondos y transparencia. 🌐 <strong>Todos los cambios se sincronizan en vivo para el resto de usuarios.</strong>
           </div>
         </div>
       </div>

@@ -105,14 +105,56 @@ export default function App() {
     }
   }, [themeConfig]);
 
+  // Suscripción en tiempo real a la configuración y tema global en Firestore
+  // Cualquier cambio que un administrador guarde se refleja de inmediato en TODOS los dispositivos y usuarios
+  useEffect(() => {
+    try {
+      const unsubConfig = onSnapshot(
+        doc(db, 'configuracion', 'apariencia'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const cloudTheme = snapshot.data() as ThemeConfig;
+            setThemeConfig((prev) => ({
+              ...prev,
+              ...cloudTheme,
+            }));
+            try {
+              localStorage.setItem('app_theme_config', JSON.stringify(cloudTheme));
+            } catch {}
+          }
+        },
+        (err) => {
+          console.log('[Theme] Error sincronizando tema global desde Firestore:', err);
+        }
+      );
+      return () => unsubConfig();
+    } catch (e) {
+      console.log('[Theme] Error conectando a configuración:', e);
+    }
+  }, []);
+
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleSaveTheme = (newTheme: ThemeConfig) => {
+    // 1. Actualización local inmediata para respuesta instantánea en la pantalla
     setThemeConfig(newTheme);
     try {
       localStorage.setItem('app_theme_config', JSON.stringify(newTheme));
     } catch {}
+
+    // 2. Sincronización en Firestore con debounce (350ms) para que se aplique en vivo a todos los usuarios
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        await setDoc(doc(db, 'configuracion', 'apariencia'), newTheme, { merge: true });
+        console.log('[Theme] Configuración global sincronizada en Firestore para todos los usuarios');
+      } catch (err) {
+        console.error('[Theme] Error sincronizando configuración en Firestore:', err);
+      }
+    }, 350);
   };
 
-  const handleResetTheme = () => {
+  const handleResetTheme = async () => {
     const defaultTheme: ThemeConfig = {
       accentColor: '#2563eb',
       customBgUrl: null,
@@ -125,6 +167,13 @@ export default function App() {
     try {
       localStorage.removeItem('app_theme_config');
     } catch {}
+
+    try {
+      await setDoc(doc(db, 'configuracion', 'apariencia'), defaultTheme);
+      console.log('[Theme] Configuración global restablecida en Firestore');
+    } catch (err) {
+      console.error('[Theme] Error restableciendo configuración en Firestore:', err);
+    }
   };
 
   const fotoPerfilInputRef = useRef<HTMLInputElement>(null);
