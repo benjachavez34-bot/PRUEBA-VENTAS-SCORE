@@ -1,0 +1,21 @@
+{
+	"appId": "com.ventasscore.app",
+	"appName": "Ventas Score",
+	"webDir": "dist",
+	"server": {
+		"url": "https://benjachavez34-bot.github.io/PRUEBA-VENTAS-SCORE/",
+		"cleartext": true
+	},
+	"android": {
+		"allowMixedContent": true
+	},
+	"plugins": {
+		"PushNotifications": {
+			"presentationOptions": [
+				"badge",
+				"sound",
+				"alert"
+			]
+		}
+	}
+}
