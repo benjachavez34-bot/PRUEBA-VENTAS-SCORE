@@ -246,6 +246,13 @@ export default function App() {
   // Estado de Miembros y Chat en tiempo real
   const [miembros, setMiembros] = useState<Miembro[]>([]);
   const [mensajes, setMensajes] = useState<MensajeChat[]>([]);
+  const [inAppBanner, setInAppBanner] = useState<{
+    id: string;
+    deNombre: string;
+    texto: string;
+    avatarId?: string;
+  } | null>(null);
+  const [mensajesNoLeidos, setMensajesNoLeidos] = useState<number>(0);
 
   // Estado de Mi Cuenta (Perfil)
   const [modalCuentaOpen, setModalCuentaOpen] = useState<boolean>(false);
@@ -602,11 +609,28 @@ export default function App() {
         list.sort((a, b) => a.ts - b.ts);
         setMensajes(list);
 
-        // Notificación de mensajes nuevos en tiempo real con sonido, parpadeo de pestaña y Service Worker
+        // Notificación de mensajes nuevos en tiempo real con sonido, parpadeo de pestaña y banner flotante
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const newMsg = change.doc.data() as MensajeChat;
-            if (newMsg && newMsg.deEmail !== user?.email && Date.now() - (newMsg.ts || 0) < 30000) {
+            const isFromOther = Boolean(newMsg && newMsg.deEmail?.toLowerCase() !== user?.email?.toLowerCase());
+            const isRecent = Date.now() - (newMsg.ts || 0) < 45000;
+            if (isFromOther && isRecent) {
+              // 1. Mostrar banner flotante en la pantalla (visible en iPhone, Android y Desktop)
+              setInAppBanner({
+                id: newMsg.id || String(Date.now()),
+                deNombre: newMsg.deNombre || 'Compañero',
+                texto: newMsg.texto || '',
+                avatarId: newMsg.avatarId,
+              });
+              setTimeout(() => {
+                setInAppBanner((curr) => (curr?.texto === newMsg.texto ? null : curr));
+              }, 6500);
+
+              // 2. Incrementar badge de no leídos
+              setMensajesNoLeidos((prev) => prev + 1);
+
+              // 3. Reproducir sonido y disparar notificación web/sistema
               showBrowserNotification(
                 `💬 ${newMsg.deNombre || 'Compañero'}:`,
                 newMsg.texto || 'Nuevo mensaje en Ventas Score'
@@ -3010,9 +3034,29 @@ export default function App() {
             </div>
             <div
               className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
-              onClick={() => setActiveTab('miembros')}
+              onClick={() => {
+                setActiveTab('miembros');
+                setMensajesNoLeidos(0);
+                setInAppBanner(null);
+              }}
+              style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              👥 Miembros & Chat
+              <span>👥 Miembros & Chat</span>
+              {mensajesNoLeidos > 0 && activeTab !== 'miembros' && (
+                <span
+                  style={{
+                    background: '#ef4444',
+                    color: '#fff',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    padding: '1px 6px',
+                    borderRadius: 10,
+                    boxShadow: '0 0 8px rgba(239,68,68,0.8)',
+                  }}
+                >
+                  {mensajesNoLeidos}
+                </span>
+              )}
             </div>
             {isAdmin && (
               <>
@@ -4967,6 +5011,91 @@ export default function App() {
         onClose={() => setScannerOpen(false)}
         onScanSuccess={handleBarcodeScanned}
       />
+
+      {/* BANNER FLOTANTE DE MENSAJE NUEVO (ESTILO NOTIFICACIÓN PUSH EN PANTALLA) */}
+      {inAppBanner && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 14,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            maxWidth: 420,
+            width: '94%',
+            background: 'rgba(15, 23, 42, 0.94)',
+            color: '#fff',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            borderRadius: 16,
+            padding: '12px 14px',
+            boxShadow: '0 12px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.15)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            cursor: 'pointer',
+          }}
+          onClick={() => {
+            setActiveTab('miembros');
+            setInAppBanner(null);
+            setMensajesNoLeidos(0);
+          }}
+        >
+          <img
+            src={
+              inAppBanner.avatarId?.startsWith('data:image/') || inAppBanner.avatarId?.startsWith('http')
+                ? inAppBanner.avatarId
+                : scoreGorillaLogo
+            }
+            alt=""
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              flexShrink: 0,
+              border: '2px solid var(--accent)',
+            }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 800, fontSize: '0.88rem', color: '#60a5fa' }}>
+                💬 {inAppBanner.deNombre}
+              </span>
+              <span style={{ fontSize: '0.70rem', opacity: 0.65 }}>Ahora</span>
+            </div>
+            <div
+              style={{
+                fontSize: '0.82rem',
+                marginTop: 2,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                opacity: 0.92,
+              }}
+            >
+              {inAppBanner.texto}
+            </div>
+          </div>
+          <button
+            type="button"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255,255,255,0.6)',
+              fontSize: '1rem',
+              padding: 4,
+              cursor: 'pointer',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setInAppBanner(null);
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* TOAST FLOTANTE */}
       {toast && (

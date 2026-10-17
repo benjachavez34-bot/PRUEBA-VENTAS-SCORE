@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Miembro, MensajeChat } from '../types';
 import { fTs } from '../utils/formatters';
 import scoreGorillaLogo from '../assets/images/score_gorilla_bg_1791923074721.jpg';
+import { playNotificationSound, showBrowserNotification } from '../utils/pushNotifications';
 
 interface MiembrosChatViewProps {
   miembros: Miembro[];
@@ -410,6 +411,23 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             </div>
             <div className="sub" style={{ fontSize: '0.8rem' }}>
               Espacio oficial para que la administración (Benjamín) comunique metas, cambios de ruta, alertas de stock y para que el equipo reporte novedades en tiempo real.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+              <span className="sub" style={{ fontSize: '0.74rem' }}>
+                💡 En iPhone / Safari: Activa alertas flotantes en pantalla y sonido.
+              </span>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ fontSize: '0.74rem', padding: '3px 8px', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                onClick={() => {
+                  playNotificationSound();
+                  showBrowserNotification('💬 Prueba de Notificación', '¡El sistema de sonido y alertas está funcionando!');
+                  alert('🔔 Prueba ejecutada:\n\n1. Sonido acústico dual reproducido.\n2. Alerta de mensaje enviada.\n\nEn iPhone (Safari normal), las alertas flotantes y sonidos se activan mientras tienes la app abierta. Si deseas notificaciones con pantalla apagada en iPhone, agrega el ícono a tu inicio (Compartir ➔ Agregar a pantalla de inicio).');
+                }}
+              >
+                🧪 Probar sonido y alerta
+              </button>
             </div>
           </div>
 
