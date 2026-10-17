@@ -3,6 +3,7 @@ import {
   Producto,
   CierreCaja,
   Deudor,
+  Cliente,
   ResumenPeriodo,
   FiltroPeriodo,
   EstadisticasPeriodo,
@@ -36,22 +37,66 @@ export function stockDe(pid: string, movs: Movimiento[]): number {
   }, 0);
 }
 
-export function getDeudores(movs: Movimiento[]): Deudor[] {
-  const map: Record<string, { nombre: string; deuda: number }> = {};
+export function getDeudores(
+  movs: Movimiento[],
+  clientesMap?: Record<string, Cliente>
+): Deudor[] {
+  const map: Record<
+    string,
+    {
+      nombre: string;
+      deuda: number;
+      primerDeudaTs?: number;
+      ultimoMovimientoTs?: number;
+    }
+  > = {};
+
   movs.forEach((m) => {
     if (!m.cliente) return;
     const isDebt = (m.tipo === 'venta' && m.fiado) || m.tipo === 'deuda';
     const isPay = m.tipo === 'pago';
     if (!isDebt && !isPay) return;
-    const k = m.cliente.toLowerCase();
+    const k = m.cliente.trim().toLowerCase();
     if (!map[k]) {
-      map[k] = { nombre: m.cliente, deuda: 0 };
+      map[k] = { nombre: m.cliente.trim(), deuda: 0 };
     }
-    map[k].deuda += isDebt ? (m.total || 0) : -(m.total || 0);
+    map[k].deuda += isDebt ? m.total || 0 : -(m.total || 0);
+
+    // Registrar antigüedad de deuda
+    if (isDebt && m.ts) {
+      if (!map[k].primerDeudaTs || m.ts < map[k].primerDeudaTs!) {
+        map[k].primerDeudaTs = m.ts;
+      }
+    }
+    if (m.ts) {
+      if (!map[k].ultimoMovimientoTs || m.ts > map[k].ultimoMovimientoTs!) {
+        map[k].ultimoMovimientoTs = m.ts;
+      }
+    }
   });
-  return Object.values(map).sort(
-    (a, b) => b.deuda - a.deuda || a.nombre.localeCompare(b.nombre)
-  );
+
+  const now = Date.now();
+
+  return Object.values(map)
+    .map((item) => {
+      const k = item.nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const clienteInfo = clientesMap ? clientesMap[k] : undefined;
+
+      const diasAntiguedad = item.primerDeudaTs
+        ? Math.max(0, Math.floor((now - item.primerDeudaTs) / (1000 * 60 * 60 * 24)))
+        : 0;
+
+      return {
+        nombre: item.nombre,
+        deuda: item.deuda,
+        telefono: clienteInfo?.telefono,
+        limiteCredito: clienteInfo?.limiteCredito,
+        primerDeudaTs: item.primerDeudaTs,
+        ultimoMovimientoTs: item.ultimoMovimientoTs,
+        diasAntiguedad,
+      };
+    })
+    .sort((a, b) => b.deuda - a.deuda || a.nombre.localeCompare(b.nombre));
 }
 
 export function invertido(pid: string, movs: Movimiento[]): number {

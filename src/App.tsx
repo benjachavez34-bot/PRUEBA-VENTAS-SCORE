@@ -29,7 +29,7 @@ import {
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { Producto, Movimiento, CierreCaja, Deudor, Miembro, MensajeChat, EvaluacionVendedor } from './types';
+import { Producto, Movimiento, CierreCaja, Deudor, Cliente, Miembro, MensajeChat, EvaluacionVendedor } from './types';
 import {
   fTs,
   fmt,
@@ -294,6 +294,42 @@ export default function App() {
     }
   });
 
+  // Directorio de clientes con teléfono WhatsApp y límite de crédito
+  const [clientes, setClientes] = useState<Record<string, Cliente>>(() => {
+    try {
+      const saved = localStorage.getItem('clientes_directorio');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  // Modal para editar / registrar teléfono WhatsApp y datos del cliente
+  const [modalCliente, setModalCliente] = useState<{
+    isOpen: boolean;
+    nombre: string;
+    telefono: string;
+    limiteCredito: string;
+    autoOpenWhatsApp?: boolean;
+    mensajeWhatsApp?: string;
+  }>({
+    isOpen: false,
+    nombre: '',
+    telefono: '',
+    limiteCredito: '',
+  });
+
+  // Modal de Comprobante Digital de Abono / Pago listo para WhatsApp
+  const [modalComprobante, setModalComprobante] = useState<{
+    isOpen: boolean;
+    cliente: string;
+    montoAbonado: number;
+    saldoAnterior: number;
+    saldoRestante: number;
+    fecha: string;
+    telefono?: string;
+  } | null>(null);
+
   // App data
   const [productos, setProductos] = useState<Producto[]>([]);
   const [movs, setMovs] = useState<Movimiento[]>([]);
@@ -306,9 +342,11 @@ export default function App() {
   const [vTotal, setVTotal] = useState<string>('');
   const [vFiado, setVFiado] = useState<boolean>(false);
   const [vCliente, setVCliente] = useState<string>('');
+  const [vTelefono, setVTelefono] = useState<string>('');
 
   // Deuda Form State
   const [dNombre, setDNombre] = useState<string>('');
+  const [dTelefono, setDTelefono] = useState<string>('');
   const [dProductoId, setDProductoId] = useState<string>('');
   const [dCantidad, setDCantidad] = useState<string>('');
   const [dPrecio, setDPrecio] = useState<string>('');
@@ -676,6 +714,21 @@ export default function App() {
       (err) => console.log('[Evaluaciones] err', err)
     );
 
+    const unsubClientes = onSnapshot(
+      collection(db, 'clientes'),
+      (snapshot) => {
+        const map: Record<string, Cliente> = {};
+        snapshot.docs.forEach((d) => {
+          map[d.id] = { id: d.id, ...(d.data() as Omit<Cliente, 'id'>) };
+        });
+        setClientes(map);
+        try {
+          localStorage.setItem('clientes_directorio', JSON.stringify(map));
+        } catch {}
+      },
+      (err) => console.log('[Clientes] err', err)
+    );
+
     return () => {
       unsubProds();
       unsubCierres();
@@ -683,6 +736,7 @@ export default function App() {
       unsubMiembros();
       unsubMensajes();
       unsubEvaluaciones();
+      unsubClientes();
     };
   }, [user, isGuest]);
 
@@ -703,12 +757,17 @@ export default function App() {
     };
   }, []);
 
-  // Clients list for datalist suggestions
+  // Clients list for datalist suggestions (de movs y de clientes registrados)
   const clientNames = useMemo(() => {
-    return Array.from(
-      new Set(movs.map((m) => m.cliente).filter((c): c is string => Boolean(c)))
-    ).sort();
-  }, [movs]);
+    const setNames = new Set<string>();
+    movs.forEach((m) => {
+      if (m.cliente && m.cliente.trim()) setNames.add(m.cliente.trim());
+    });
+    Object.values(clientes).forEach((c) => {
+      if (c.nombre && c.nombre.trim()) setNames.add(c.nombre.trim());
+    });
+    return Array.from(setNames).sort((a, b) => a.localeCompare(b));
+  }, [movs, clientes]);
 
   // Helper to add a movement
   const addMov = async (m: Omit<Movimiento, 'ts' | 'fecha' | 'por'>): Promise<boolean> => {
@@ -760,6 +819,131 @@ export default function App() {
     } catch (err: any) {
       console.error('Error guardando evaluación en Firestore:', err);
       showToast(`Evaluación guardada localmente`);
+    }
+  };
+
+  const handleGuardarCliente = async (
+    nombre: string,
+    telefono?: string,
+    limiteCredito?: number,
+    direccion?: string,
+    notas?: string
+  ) => {
+    if (!nombre.trim()) return null;
+    const cleanNombre = nombre.trim();
+    const docKey = cleanNombre.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const existing = clientes[docKey];
+
+    const nuevoCliente: Cliente = {
+      id: docKey,
+      nombre: cleanNombre,
+      telefono: telefono !== undefined ? telefono.trim() : (existing?.telefono || ''),
+      limiteCredito: limiteCredito !== undefined ? limiteCredito : existing?.limiteCredito,
+      direccion: direccion !== undefined ? direccion.trim() : (existing?.direccion || ''),
+      notas: notas !== undefined ? notas.trim() : (existing?.notas || ''),
+      creadoEn: existing?.creadoEn || Date.now(),
+      actualizadoEn: Date.now(),
+    };
+
+    setClientes((prev) => {
+      const updated = { ...prev, [docKey]: nuevoCliente };
+      try {
+        localStorage.setItem('clientes_directorio', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (!isGuest) {
+      try {
+        await setDoc(doc(db, 'clientes', docKey), nuevoCliente, { merge: true });
+      } catch (e) {
+        console.error('Error guardando cliente en Firestore:', e);
+      }
+    }
+    return nuevoCliente;
+  };
+
+  // Helper: Enviar cobranza / recordatorio de deuda por WhatsApp con 1 toque
+  const handleWhatsAppRecordatorio = (d: Deudor) => {
+    const docKey = d.nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const tel = d.telefono || clientes[docKey]?.telefono;
+
+    // Resumen de las últimas compras adeudadas
+    const clienteMovs = movs.filter(
+      (m) => m.cliente && m.cliente.trim().toLowerCase() === d.nombre.trim().toLowerCase()
+    );
+    const comprasFiadas = clienteMovs.filter((m) => (m.tipo === 'venta' && m.fiado) || m.tipo === 'deuda');
+    const itemsTxt = comprasFiadas
+      .slice(0, 3)
+      .map((m) => (m.producto ? `${m.cant ? `${m.cant}x ` : ''}${m.producto}` : 'Compra'))
+      .join(', ');
+    const extraTxt = comprasFiadas.length > 3 ? ` y ${comprasFiadas.length - 3} compras más` : '';
+    const detalleCompras = itemsTxt ? ` (${itemsTxt}${extraTxt})` : '';
+
+    const mensaje = `Hola *${d.nombre}*! 👋 Te saludamos cordialmente de *Ventas Score* ⚡.\n\nTe escribimos para recordarte que mantienes un saldo pendiente de *${fmt(
+      d.deuda
+    )}*${detalleCompras}.\n\n¿Nos confirmas si puedes realizar la transferencia o pago? ¡Muchas gracias por tu preferencia y que tengas un excelente día! 🥤`;
+
+    if (tel && tel.replace(/\D/g, '').length >= 8) {
+      let cleanPhone = tel.replace(/\D/g, '');
+      if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+        cleanPhone = '56' + cleanPhone;
+      } else if (cleanPhone.length === 8) {
+        cleanPhone = '569' + cleanPhone;
+      }
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(mensaje)}`, '_blank');
+    } else {
+      // Si no tiene teléfono guardado, abrir modal para registrarlo y enviarle el WhatsApp al instante
+      setModalCliente({
+        isOpen: true,
+        nombre: d.nombre,
+        telefono: '+56 9 ',
+        limiteCredito: d.limiteCredito ? String(d.limiteCredito) : '',
+        autoOpenWhatsApp: true,
+        mensajeWhatsApp: mensaje,
+      });
+    }
+  };
+
+  // Helper: Enviar comprobante digital de abono por WhatsApp
+  const handleEnviarComprobanteWhatsApp = (
+    nombre: string,
+    monto: number,
+    saldoAnterior: number,
+    saldoRestante: number,
+    fechaHora?: string
+  ) => {
+    const docKey = nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const tel = clientes[docKey]?.telefono;
+    const fecha = fechaHora || fTs(Date.now());
+
+    const texto = `🧾 *COMPROBANTE DE ABONO - VENTAS SCORE* ⚡\n══════════════════════════\n👤 *Cliente:* ${nombre}\n💵 *Monto abonado:* ${fmt(
+      monto
+    )}\n📅 *Fecha:* ${fecha}\n👤 *Recibido por:* ${miNombre}\n\n📊 *Estado de Cuenta:*\n• Saldo anterior: ${fmt(
+      saldoAnterior
+    )}\n• Saldo restante: ${fmt(saldoRestante)}\n\n${
+      saldoRestante <= 0
+        ? '✨ *¡Tu cuenta ha quedado 100% al día! Muchas gracias.*'
+        : '¡Agradecemos tu puntual abono!'
+    }\n══════════════════════════`;
+
+    if (tel && tel.replace(/\D/g, '').length >= 8) {
+      let cleanPhone = tel.replace(/\D/g, '');
+      if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+        cleanPhone = '56' + cleanPhone;
+      } else if (cleanPhone.length === 8) {
+        cleanPhone = '569' + cleanPhone;
+      }
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(texto)}`, '_blank');
+    } else {
+      setModalCliente({
+        isOpen: true,
+        nombre,
+        telefono: '+56 9 ',
+        limiteCredito: '',
+        autoOpenWhatsApp: true,
+        mensajeWhatsApp: texto,
+      });
     }
   };
 
@@ -1415,10 +1599,14 @@ export default function App() {
     });
 
     if (ok) {
+      if (vFiado && cliente && vTelefono && vTelefono.trim()) {
+        handleGuardarCliente(cliente, vTelefono.trim());
+      }
       setVCantidad('');
       setVPrecio('');
       setVTotal('');
       setVCliente('');
+      setVTelefono('');
       setVFiado(false);
     }
   };
@@ -1480,7 +1668,11 @@ export default function App() {
     }
 
     if (ok) {
+      if (dTelefono && dTelefono.trim()) {
+        handleGuardarCliente(nombre, dTelefono.trim());
+      }
       setDNombre('');
+      setDTelefono('');
       setDCantidad('');
       setDPrecio('');
       setDMonto('');
@@ -1491,7 +1683,7 @@ export default function App() {
   const handleOpenAbonar = (nombre: string, deuda?: number) => {
     let dVal = deuda;
     if (dVal === undefined) {
-      const deudoresList = getDeudores(movs);
+      const deudoresList = getDeudores(movs, clientes);
       const d = deudoresList.find((x) => x.nombre.toLowerCase() === nombre.toLowerCase());
       dVal = d ? d.deuda : 0;
     }
@@ -1514,20 +1706,41 @@ export default function App() {
       setErrorAbono(`El abono supera la deuda (${fmt(modalAbono.deuda)})`);
       return;
     }
+
+    const anterior = modalAbono.deuda;
+    const restante = Math.max(0, anterior - m);
+    const clienteNombre = modalAbono.nombre;
+
     const ok = await addMov({
       tipo: 'pago',
       total: m,
-      cliente: modalAbono.nombre,
+      cliente: clienteNombre,
     });
     if (ok) {
       setModalAbono({ isOpen: false, nombre: '', deuda: 0 });
       setMontoAbono('');
       setErrorAbono(null);
+
+      // Abrir modal con comprobante digital listo para enviar por WhatsApp
+      const docKey = clienteNombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      setModalComprobante({
+        isOpen: true,
+        cliente: clienteNombre,
+        montoAbonado: m,
+        saldoAnterior: anterior,
+        saldoRestante: restante,
+        fecha: fTs(Date.now()),
+        telefono: clientes[docKey]?.telefono,
+      });
     }
   };
 
   const handleSumarDeuda = (nombre: string) => {
     setDNombre(nombre);
+    const docKey = nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    if (clientes[docKey]?.telefono) {
+      setDTelefono(clientes[docKey].telefono || '');
+    }
     if (dNombreInputRef.current) {
       dNombreInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
       dNombreInputRef.current.focus();
@@ -1543,6 +1756,7 @@ export default function App() {
       confirmText: '✔ Sí, saldar deuda',
       confirmClass: 'btn-green',
       onConfirm: async () => {
+        const anterior = deuda;
         await addMov({
           tipo: 'pago',
           total: deuda,
@@ -1550,6 +1764,17 @@ export default function App() {
           nota: 'saldada',
         });
         setModalConfirm((prev) => ({ ...prev, isOpen: false }));
+
+        const docKey = nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        setModalComprobante({
+          isOpen: true,
+          cliente: nombre,
+          montoAbonado: anterior,
+          saldoAnterior: anterior,
+          saldoRestante: 0,
+          fecha: fTs(Date.now()),
+          telefono: clientes[docKey]?.telefono,
+        });
       },
     });
   };
@@ -1925,11 +2150,23 @@ export default function App() {
   const t0 = useMemo(() => getT0(cierres), [cierres]);
   const resumenPeriodo = useMemo(() => calcResumen(movs, productos, t0), [movs, productos, t0]);
   const resumenTotal = useMemo(() => calcResumen(movs, productos, 0), [movs, productos]);
-  const deudoresList = useMemo(() => getDeudores(movs).filter((d) => d.deuda > 0.5), [movs]);
+  const deudoresList = useMemo(() => getDeudores(movs, clientes).filter((d) => d.deuda > 0.5), [movs, clientes]);
   const totalDeudaNum = useMemo(
     () => deudoresList.reduce((s, d) => s + Math.max(0, d.deuda), 0),
     [deudoresList]
   );
+  const resumenMorosidad = useMemo(() => {
+    let alDia = 0;
+    let atencion = 0;
+    let critico = 0;
+    deudoresList.forEach((d) => {
+      const dias = d.diasAntiguedad || 0;
+      if (dias > 15) critico++;
+      else if (dias >= 7) atencion++;
+      else alDia++;
+    });
+    return { alDia, atencion, critico };
+  }, [deudoresList]);
   const deudoresFiltrados = useMemo(() => {
     const q = busquedaDeudor.trim().toLowerCase();
     if (!q) return deudoresList;
@@ -3235,18 +3472,35 @@ export default function App() {
                     </label>
                   </div>
                   {vFiado && (
-                    <div className="row" id="filaCliente">
-                      <input
-                        placeholder="Nombre del cliente"
-                        list="listaClientes"
-                        value={vCliente}
-                        onChange={(e) => setVCliente(e.target.value)}
-                      />
-                      <datalist id="listaClientes">
-                        {clientNames.map((name) => (
-                          <option key={name} value={name} />
-                        ))}
-                      </datalist>
+                    <div className="row" id="filaCliente" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                      <div>
+                        <input
+                          placeholder="Nombre del cliente fiado"
+                          list="listaClientes"
+                          value={vCliente}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setVCliente(val);
+                            const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+                            if (clientes[k]?.telefono && (!vTelefono || vTelefono === '+56 9 ')) {
+                              setVTelefono(clientes[k].telefono || '');
+                            }
+                          }}
+                        />
+                        <datalist id="listaClientes">
+                          {clientNames.map((name) => (
+                            <option key={name} value={name} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <div>
+                        <input
+                          type="tel"
+                          placeholder="WhatsApp (+56 9...)"
+                          value={vTelefono}
+                          onChange={(e) => setVTelefono(e.target.value)}
+                        />
+                      </div>
                     </div>
                   )}
                   <div className="row">
@@ -3297,14 +3551,31 @@ export default function App() {
                   <div className="sub" style={{ marginBottom: 6, fontWeight: 600 }}>
                     Agregar deuda (si eliges producto, se descuenta del stock)
                   </div>
-                  <div className="row">
-                    <input
-                      ref={dNombreInputRef}
-                      placeholder="Nombre del deudor"
-                      list="listaClientes"
-                      value={dNombre}
-                      onChange={(e) => setDNombre(e.target.value)}
-                    />
+                  <div className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                    <div>
+                      <input
+                        ref={dNombreInputRef}
+                        placeholder="Nombre del deudor / cliente"
+                        list="listaClientes"
+                        value={dNombre}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDNombre(val);
+                          const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+                          if (clientes[k]?.telefono && (!dTelefono || dTelefono === '+56 9 ')) {
+                            setDTelefono(clientes[k].telefono || '');
+                          }
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="tel"
+                        placeholder="WhatsApp (+56 9...)"
+                        value={dTelefono}
+                        onChange={(e) => setDTelefono(e.target.value)}
+                      />
+                    </div>
                   </div>
                   <div className="row">
                     <select
@@ -3364,6 +3635,57 @@ export default function App() {
                   </div>
                   <span className="debt">{fmt(totalDeudaNum)}</span>
                 </div>
+
+                {/* BARRA DE SALUD DE CARTERA / MOROSIDAD */}
+                {deudoresList.length > 0 && (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: 8,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.12)',
+                        border: '1px solid rgba(16, 185, 129, 0.28)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#10b981' }}>🟢 AL DÍA (&lt;7d)</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.alDia} clientes</div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        border: '1px solid rgba(245, 158, 11, 0.28)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#f59e0b' }}>🟡 ATENCIÓN (7-15d)</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.atencion} clientes</div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.12)',
+                        border: '1px solid rgba(239, 68, 68, 0.28)',
+                        borderRadius: 8,
+                        padding: '8px 10px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#ef4444' }}>🔴 VENCIDO (&gt;15d)</div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.critico} clientes</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* BUSCADOR DE DEUDORES */}
                 <div className="card" style={{ padding: '8px 10px', marginBottom: 10 }}>
@@ -3428,17 +3750,86 @@ export default function App() {
                             paddingBottom: isExpanded ? 6 : 0,
                           }}
                         >
-                          <div className="item" style={{ borderBottom: 'none' }}>
+                          <div className="item" style={{ borderBottom: 'none', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
                             <div
-                              style={{ cursor: 'pointer', flex: 1, userSelect: 'none' }}
+                              style={{ cursor: 'pointer', flex: 1, minWidth: 200, userSelect: 'none' }}
                               onClick={() => toggleDeudorDetalle(d.nombre)}
-                              title="Toca para ver u ocultar productos que debe"
+                              title="Toca para ver u ocultar compras y pagos"
                             >
                               <div
                                 className="name"
-                                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
                               >
-                                <span>{d.nombre}</span>
+                                <span style={{ fontWeight: 800 }}>{d.nombre}</span>
+
+                                {/* Teléfono WhatsApp con opción de editar/agregar */}
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    color: d.telefono ? 'var(--text)' : 'var(--muted)',
+                                    fontWeight: 600,
+                                    background: 'var(--bg)',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    border: '1px solid var(--border)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 3,
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setModalCliente({
+                                      isOpen: true,
+                                      nombre: d.nombre,
+                                      telefono: d.telefono || '+56 9 ',
+                                      limiteCredito: d.limiteCredito ? String(d.limiteCredito) : '',
+                                    });
+                                  }}
+                                  title="Toca para registrar o editar teléfono WhatsApp"
+                                >
+                                  <span>📞 {d.telefono || 'Sin teléfono'}</span>
+                                  <span style={{ fontSize: '0.68rem', color: 'var(--accent)' }}>✏️</span>
+                                </span>
+
+                                {/* Badge Semáforo de Morosidad */}
+                                {d.diasAntiguedad !== undefined && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.70rem',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      background:
+                                        d.diasAntiguedad > 15
+                                          ? 'rgba(239, 68, 68, 0.18)'
+                                          : d.diasAntiguedad >= 7
+                                          ? 'rgba(245, 158, 11, 0.18)'
+                                          : 'rgba(16, 185, 129, 0.18)',
+                                      color:
+                                        d.diasAntiguedad > 15
+                                          ? '#ef4444'
+                                          : d.diasAntiguedad >= 7
+                                          ? '#f59e0b'
+                                          : '#10b981',
+                                      border: `1px solid ${
+                                        d.diasAntiguedad > 15
+                                          ? 'rgba(239, 68, 68, 0.35)'
+                                          : d.diasAntiguedad >= 7
+                                          ? 'rgba(245, 158, 11, 0.35)'
+                                          : 'rgba(16, 185, 129, 0.35)'
+                                      }`,
+                                    }}
+                                    title={`Deuda contraída hace ${d.diasAntiguedad} días`}
+                                  >
+                                    {d.diasAntiguedad > 15
+                                      ? `🔴 Vencida (${d.diasAntiguedad}d)`
+                                      : d.diasAntiguedad >= 7
+                                      ? `🟡 Atención (${d.diasAntiguedad}d)`
+                                      : `🟢 Al día (${d.diasAntiguedad === 0 ? 'Hoy' : `${d.diasAntiguedad}d`})`}
+                                  </span>
+                                )}
+
                                 <span
                                   style={{
                                     fontSize: '0.72rem',
@@ -3455,11 +3846,32 @@ export default function App() {
                                     : `▼ ${comprasFiadas.length} compra${comprasFiadas.length === 1 ? '' : 's'}`}
                                 </span>
                               </div>
-                              <div className={`amount ${d.deuda > 0 ? 'debt' : 'ok'}`}>
+                              <div className={`amount ${d.deuda > 0 ? 'debt' : 'ok'}`} style={{ marginTop: 2 }}>
                                 {d.deuda > 0 ? fmt(d.deuda) : 'Al día'}
                               </div>
                             </div>
-                            <div className="actions">
+                            <div className="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                style={{
+                                  background: '#25D366',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  padding: '5px 10px',
+                                  borderRadius: 6,
+                                  fontSize: '0.80rem',
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  boxShadow: '0 2px 6px rgba(37,211,102,0.3)',
+                                  cursor: 'pointer',
+                                }}
+                                onClick={() => handleWhatsAppRecordatorio(d)}
+                                title="Enviar cobranza / recordatorio por WhatsApp"
+                              >
+                                <span>💬 WhatsApp</span>
+                              </button>
                               <button
                                 className="btn-green"
                                 onClick={() => handleOpenAbonar(d.nombre, d.deuda)}
@@ -3576,15 +3988,43 @@ export default function App() {
                                         style={{
                                           display: 'flex',
                                           justifyContent: 'space-between',
+                                          alignItems: 'center',
                                           fontSize: '0.8rem',
+                                          gap: 6,
                                         }}
                                       >
                                         <span className="sub">
                                           {fTs(p.ts)} {p.nota ? `(${p.nota})` : ''}
                                         </span>
-                                        <span className="amount ok" style={{ fontSize: '0.85rem' }}>
-                                          -{fmt(p.total || 0)}
-                                        </span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                          <span className="amount ok" style={{ fontSize: '0.85rem' }}>
+                                            -{fmt(p.total || 0)}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            style={{
+                                              padding: '2px 6px',
+                                              fontSize: '0.70rem',
+                                              borderRadius: 4,
+                                              color: '#16a34a',
+                                              border: '1px solid rgba(22,163,74,0.35)',
+                                              cursor: 'pointer',
+                                            }}
+                                            onClick={() =>
+                                              handleEnviarComprobanteWhatsApp(
+                                                d.nombre,
+                                                p.total || 0,
+                                                d.deuda + (p.total || 0),
+                                                d.deuda,
+                                                fTs(p.ts)
+                                              )
+                                            }
+                                            title="Enviar comprobante de este pago por WhatsApp"
+                                          >
+                                            🧾 Comprobante
+                                          </button>
+                                        </div>
                                       </div>
                                     ))}
                                   </div>
@@ -4325,6 +4765,214 @@ export default function App() {
                 onClick={modalConfirm.onConfirm}
               >
                 {modalConfirm.confirmText || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR / REGISTRAR CLIENTE & WHATSAPP */}
+      {modalCliente.isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.60)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalCliente((prev) => ({ ...prev, isOpen: false }))}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 440,
+              width: '100%',
+              margin: 0,
+              boxShadow: '0 12px 30px rgba(0, 0, 0, 0.40)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontWeight: 800, fontSize: '1.15rem', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>📲</span>
+              <span>Datos de Contacto WhatsApp</span>
+            </div>
+            <div className="sub" style={{ marginBottom: 14, fontSize: '0.85rem' }}>
+              Cliente: <b style={{ color: 'var(--text)' }}>{modalCliente.nombre}</b>. Al ingresar el teléfono se guardará permanentemente para que no tengas que escribirlo de nuevo.
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 600, marginBottom: 4 }}>
+                Número WhatsApp (con código de país, ej: +56 9 1234 5678):
+              </label>
+              <input
+                type="tel"
+                placeholder="+56 9 1234 5678"
+                autoFocus
+                value={modalCliente.telefono}
+                onChange={(e) => setModalCliente((prev) => ({ ...prev, telefono: e.target.value }))}
+                style={{ fontSize: '1.05rem', fontWeight: 600 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: '0.80rem', fontWeight: 600, marginBottom: 4 }}>
+                Límite de Crédito Opcional $ (alerta de exceso de fiado):
+              </label>
+              <input
+                type="number"
+                placeholder="Ej: 50000 (dejar vacío si no aplica)"
+                value={modalCliente.limiteCredito}
+                onChange={(e) => setModalCliente((prev) => ({ ...prev, limiteCredito: e.target.value }))}
+                style={{ fontSize: '0.90rem' }}
+              />
+            </div>
+
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalCliente((prev) => ({ ...prev, isOpen: false }))}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: '#25D366', color: '#fff', fontWeight: 700 }}
+                onClick={async () => {
+                  const tel = modalCliente.telefono.trim();
+                  const lim = modalCliente.limiteCredito ? parseFloat(modalCliente.limiteCredito) : undefined;
+                  await handleGuardarCliente(modalCliente.nombre, tel, lim);
+
+                  if (modalCliente.autoOpenWhatsApp && modalCliente.mensajeWhatsApp) {
+                    let cleanPhone = tel.replace(/\D/g, '');
+                    if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+                      cleanPhone = '56' + cleanPhone;
+                    } else if (cleanPhone.length === 8) {
+                      cleanPhone = '569' + cleanPhone;
+                    }
+                    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(modalCliente.mensajeWhatsApp)}`, '_blank');
+                  }
+
+                  showToast('✓ Datos de cliente guardados exitosamente');
+                  setModalCliente((prev) => ({ ...prev, isOpen: false }));
+                }}
+              >
+                {modalCliente.autoOpenWhatsApp ? '💾 Guardar y Abrir WhatsApp' : '💾 Guardar Contacto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL COMPROBANTE DE ABONO / PAGO LISTO PARA WHATSAPP */}
+      {modalComprobante && modalComprobante.isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalComprobante(null)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 430,
+              width: '100%',
+              margin: 0,
+              boxShadow: '0 12px 35px rgba(0, 0, 0, 0.45)',
+              border: '1px solid rgba(34,197,94,0.3)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: '1.4rem' }}>🧾</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>¡Pago Registrado con Éxito!</div>
+                <div className="sub" style={{ fontSize: '0.78rem' }}>{modalComprobante.fecha}</div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.18)',
+                padding: '12px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                marginBottom: 14,
+                fontSize: '0.88rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span className="sub">Cliente:</span>
+                <b>{modalComprobante.cliente}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span className="sub">Monto abonado:</span>
+                <b className="ok" style={{ fontSize: '1.05rem' }}>{fmt(modalComprobante.montoAbonado)}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span className="sub">Saldo anterior:</span>
+                <span>{fmt(modalComprobante.saldoAnterior)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                <span className="sub">Nuevo saldo pendiente:</span>
+                <b className={modalComprobante.saldoRestante <= 0 ? 'ok' : 'debt'}>
+                  {modalComprobante.saldoRestante <= 0 ? '✨ Al día ($0)' : fmt(modalComprobante.saldoRestante)}
+                </b>
+              </div>
+            </div>
+
+            <div className="sub" style={{ fontSize: '0.80rem', marginBottom: 14 }}>
+              ¿Deseas enviar el comprobante de pago digital al cliente por WhatsApp?
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalComprobante(null)}
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: '#25D366',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '8px 14px',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(37,211,102,0.3)',
+                }}
+                onClick={() => {
+                  handleEnviarComprobanteWhatsApp(
+                    modalComprobante.cliente,
+                    modalComprobante.montoAbonado,
+                    modalComprobante.saldoAnterior,
+                    modalComprobante.saldoRestante,
+                    modalComprobante.fecha
+                  );
+                  setModalComprobante(null);
+                }}
+              >
+                <span>💬 Enviar Comprobante por WhatsApp</span>
               </button>
             </div>
           </div>

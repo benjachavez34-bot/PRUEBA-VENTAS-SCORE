@@ -43,9 +43,25 @@ export interface CierreCaja {
   por?: string;
 }
 
+export interface Cliente {
+  id?: string;
+  nombre: string;
+  telefono?: string;
+  limiteCredito?: number;
+  direccion?: string;
+  notas?: string;
+  creadoEn?: number;
+  actualizadoEn?: number;
+}
+
 export interface Deudor {
   nombre: string;
   deuda: number;
+  telefono?: string;
+  diasAntiguedad?: number;
+  primerDeudaTs?: number;
+  ultimoMovimientoTs?: number;
+  limiteCredito?: number;
 }
 
 export interface ResumenPeriodo {
