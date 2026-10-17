@@ -16,6 +16,9 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
   signOut,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -49,6 +52,10 @@ export const ADMIN_EMAILS = [
 ];
 
 export const isUserAdmin = (email?: string | null): boolean => {
+  try {
+    const rol = localStorage.getItem('sesion_activa_rol');
+    if (rol === 'admin') return true;
+  } catch {}
   if (!email) return false;
   return ADMIN_EMAILS.includes(email.toLowerCase().trim());
 };
@@ -73,9 +80,18 @@ export default function App() {
     }
   });
   const [authStatus, setAuthStatus] = useState<string>(
-    'Inicia sesión con una cuenta Google autorizada para acceder al registro compartido.'
+    'Inicia sesión para acceder al registro compartido.'
   );
   const [dbError, setDbError] = useState<string | null>(null);
+
+  // Estados de autenticación ampliada (Google, PIN Rápido, Correo/Clave)
+  const [loginViewMode, setLoginViewMode] = useState<'main' | 'pin' | 'email'>('main');
+  const [pinRole, setPinRole] = useState<'benja' | 'fco' | 'vendedor'>('benja');
+  const [pinValue, setPinValue] = useState<string>('');
+  const [emailVal, setEmailVal] = useState<string>('');
+  const [passVal, setPassVal] = useState<string>('');
+  const [isRegisterMode, setIsRegisterMode] = useState<boolean>(false);
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<
     'venta' | 'deudores' | 'stock' | 'miembros' | 'resumen' | 'estadisticas' | 'equipo' | 'configuracion' | 'ayuda'
@@ -309,7 +325,34 @@ export default function App() {
     // Inicializar push al cargar la app
     initializePushNotifications();
 
-    // Resolver inicio de sesión por redirección (Android WebView / móvil)
+    // Restaurar sesión activa de PIN/equipo si existe
+    try {
+      const savedRol = localStorage.getItem('sesion_activa_rol');
+      const savedNombre = localStorage.getItem('miNombre');
+      if (savedRol && savedNombre && !user) {
+        const isBenja = savedNombre.toLowerCase().includes('benja');
+        const isFco = savedNombre.toLowerCase().includes('francisco') || savedNombre.toLowerCase().includes('fco');
+        const email = isBenja
+          ? 'benja.chavez34@gmail.com'
+          : isFco
+          ? 'fco.inzunza.re@gmail.com'
+          : 'vendedor@score.cl';
+
+        signInAnonymously(auth).catch(() => {});
+
+        const synthUser: any = {
+          uid: 'saved_' + (isBenja ? 'benja' : isFco ? 'fco' : 'vendedor'),
+          email: email,
+          displayName: savedNombre,
+        };
+        setUser(synthUser);
+        setIsGuest(false);
+        setMiNombre(savedNombre);
+        setAuthStatus(`Conectado como ${savedNombre}`);
+      }
+    } catch {}
+
+    // Resolver inicio de sesión por redirección (si se utilizó redirect)
     getRedirectResult(auth)
       .then((res) => {
         if (res?.user) {
@@ -317,10 +360,8 @@ export default function App() {
         }
       })
       .catch((err) => {
-        if (err) {
-          console.error('[Auth] Error procesando redirección:', err);
-          setAuthStatus('Error en acceso Google: ' + (err?.message || err));
-        }
+        // Log info sin ensuciar la interfaz visual del usuario
+        console.log('[Auth] Estado redirección:', err?.message || err);
       });
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -387,8 +428,11 @@ export default function App() {
         }
       } else {
         if (!isGuest) {
-          setUser(null);
-          setAuthStatus('Inicia sesión con una cuenta Google autorizada para acceder al registro compartido.');
+          const savedRol = localStorage.getItem('sesion_activa_rol');
+          if (!savedRol) {
+            setUser(null);
+            setAuthStatus('Inicia sesión para acceder al registro compartido.');
+          }
         }
       }
     });
@@ -557,34 +601,167 @@ export default function App() {
 
   // Auth Handlers
   const handleLoginGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
       setAuthStatus('Iniciando sesión con Google...');
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-
-      // En la app Android (Capacitor nativo), las ventanas emergentes (popups) están bloqueadas por el WebView
-      // signInWithRedirect permite completar el inicio de sesión sin depender de popups
-      if (Capacitor.isNativePlatform()) {
-        await signInWithRedirect(auth, provider);
-      } else {
+      // Se usa signInWithPopup (funciona en web y en el APK con multi-window dialog sin perder el estado de sesión)
+      await signInWithPopup(auth, provider);
+    } catch (e: any) {
+      console.warn('Error login Google popup:', e);
+      if (
+        e?.code === 'auth/popup-blocked' ||
+        e?.code === 'auth/cancelled-popup-request'
+      ) {
         try {
-          await signInWithPopup(auth, provider);
-        } catch (popupErr: any) {
-          // Si el navegador web tiene bloqueador de ventanas emergentes, recurrir a redirect
-          if (
-            popupErr?.code === 'auth/popup-blocked' ||
-            popupErr?.code === 'auth/cancelled-popup-request' ||
-            popupErr?.code === 'auth/operation-not-supported-in-this-environment'
-          ) {
-            await signInWithRedirect(auth, provider);
-          } else {
-            throw popupErr;
-          }
+          await signInWithRedirect(auth, provider);
+        } catch (redirErr: any) {
+          console.error('Redirect err:', redirErr);
+          setAuthStatus('Google requiere autorización adicional. Puedes usar el Acceso Rápido por PIN o Correo.');
+        }
+      } else {
+        setAuthStatus('No se pudo iniciar sesión con Google: ' + (e?.message || e));
+      }
+    }
+  };
+
+  const handlePinLogin = async (role: 'benja' | 'fco' | 'vendedor', pin: string) => {
+    if (pin.trim() !== '1234') {
+      alert('PIN incorrecto. El PIN maestro inicial es: 1234');
+      return;
+    }
+    setLoginLoading(true);
+    setAuthStatus('Conectando al sistema...');
+    try {
+      let fbUser = auth.currentUser;
+      if (!fbUser) {
+        try {
+          const res = await signInAnonymously(auth);
+          fbUser = res.user;
+        } catch (anonErr) {
+          console.log('[Auth] Modo PIN directo:', anonErr);
         }
       }
-    } catch (e: any) {
-      console.error('Error login Google:', e);
-      setAuthStatus('No se pudo iniciar sesión: ' + (e?.message || e));
+
+      if (role === 'benja') {
+        const email = 'benja.chavez34@gmail.com';
+        try {
+          localStorage.setItem('sesion_activa_rol', 'admin');
+          localStorage.setItem('miNombre', 'Benjamín Chávez');
+        } catch {}
+        setMiNombre('Benjamín Chávez');
+        const userObj: any = fbUser ? { ...fbUser, email, displayName: 'Benjamín Chávez' } : {
+          uid: 'admin_benja',
+          email,
+          displayName: 'Benjamín Chávez',
+        };
+        setUser(userObj);
+        setIsGuest(false);
+        setPerfil({
+          nombre: 'Benjamín Chávez',
+          email: email,
+          rol: 'Administrador General & Director Comercial',
+          telefono: '+56 9 8765 4321',
+          sucursal: 'Casa Central - Santiago',
+          avatarId: 'gorilla',
+        });
+      } else if (role === 'fco') {
+        const email = 'fco.inzunza.re@gmail.com';
+        try {
+          localStorage.setItem('sesion_activa_rol', 'admin');
+          localStorage.setItem('miNombre', 'Francisco Inzunza');
+        } catch {}
+        setMiNombre('Francisco Inzunza');
+        const userObj: any = fbUser ? { ...fbUser, email, displayName: 'Francisco Inzunza' } : {
+          uid: 'admin_fco',
+          email,
+          displayName: 'Francisco Inzunza',
+        };
+        setUser(userObj);
+        setIsGuest(false);
+        setPerfil({
+          nombre: 'Francisco Inzunza',
+          email: email,
+          rol: 'Administrador General & Socio',
+          telefono: '',
+          sucursal: 'Casa Central - Santiago',
+          avatarId: 'gorilla',
+        });
+      } else {
+        const customName = prompt('Ingresa tu nombre:') || 'Vendedor Score';
+        try {
+          localStorage.setItem('sesion_activa_rol', 'vendedor');
+          localStorage.setItem('miNombre', customName);
+        } catch {}
+        setMiNombre(customName);
+        const userObj: any = fbUser ? { ...fbUser, email: 'vendedor@score.cl', displayName: customName } : {
+          uid: 'vendedor_' + Date.now(),
+          email: 'vendedor@score.cl',
+          displayName: customName,
+        };
+        setUser(userObj);
+        setIsGuest(false);
+        setPerfil({
+          nombre: customName,
+          email: 'vendedor@score.cl',
+          rol: 'Vendedor',
+          telefono: '',
+          sucursal: 'Ruta Comercial',
+          avatarId: 'avatar2',
+        });
+      }
+      setLoginViewMode('main');
+      setPinValue('');
+      setAuthStatus('Conectado con éxito');
+      showToast('¡Bienvenido a Ventas Score!');
+    } catch (err: any) {
+      alert('Error en acceso: ' + (err?.message || err));
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailVal.trim() || !passVal.trim()) {
+      alert('Por favor ingresa tu correo y contraseña');
+      return;
+    }
+    setLoginLoading(true);
+    setAuthStatus('Verificando acceso...');
+    try {
+      if (isRegisterMode) {
+        await createUserWithEmailAndPassword(auth, emailVal.trim(), passVal);
+        showToast('Cuenta creada y conectada');
+      } else {
+        try {
+          await signInWithEmailAndPassword(auth, emailVal.trim(), passVal);
+          showToast('Sesión iniciada con éxito');
+        } catch (loginErr: any) {
+          if (
+            loginErr?.code === 'auth/user-not-found' ||
+            loginErr?.code === 'auth/invalid-credential'
+          ) {
+            const createNow = window.confirm(
+              'No existe una cuenta registrada con este correo. ¿Deseas registrarla con esta contraseña ahora?'
+            );
+            if (createNow) {
+              await createUserWithEmailAndPassword(auth, emailVal.trim(), passVal);
+              showToast('Cuenta registrada con éxito');
+              setLoginViewMode('main');
+              return;
+            }
+          }
+          throw loginErr;
+        }
+      }
+      setLoginViewMode('main');
+    } catch (err: any) {
+      console.error('Error email auth:', err);
+      alert('Error al acceder: ' + (err?.message || err));
+      setAuthStatus('Error: ' + (err?.message || err));
+    } finally {
+      setLoginLoading(false);
     }
   };
 
@@ -612,8 +789,13 @@ export default function App() {
       if (user) {
         await signOut(auth);
       }
+      try {
+        localStorage.removeItem('sesion_activa_rol');
+      } catch {}
       setIsGuest(false);
       setUser(null);
+      setAuthStatus('Inicia sesión para continuar');
+      showToast('Sesión cerrada');
     } catch (e: any) {
       alert('No se pudo cerrar sesión: ' + e?.message);
     }
@@ -1433,60 +1615,289 @@ export default function App() {
               Control integral de ventas, inventario, deudores y métricas en tiempo real.
             </div>
 
-            {/* BOTONES DE ACCIÓN */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleLoginGoogle}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 12,
-                  padding: '12px 18px',
-                  fontSize: '0.96rem',
-                  fontWeight: 700,
-                  borderRadius: 12,
-                  boxShadow: '0 4px 15px rgba(37,99,235,0.35)',
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    fill="#4285F4"
-                  />
-                  <path
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    fill="#34A853"
-                  />
-                  <path
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    fill="#FBBC05"
-                  />
-                  <path
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    fill="#EA4335"
-                  />
-                </svg>
-                <span>Continuar con Google</span>
-              </button>
+            {/* BOTONES DE ACCIÓN SEGÚN MODO */}
+            {loginViewMode === 'main' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleLoginGoogle}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 12,
+                    padding: '12px 18px',
+                    fontSize: '0.96rem',
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    boxShadow: '0 4px 15px rgba(37,99,235,0.35)',
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      fill="#34A853"
+                    />
+                    <path
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      fill="#FBBC05"
+                    />
+                    <path
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      fill="#EA4335"
+                    />
+                  </svg>
+                  <span>Continuar con Google</span>
+                </button>
 
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={handleGuestLogin}
-                style={{
-                  padding: '10px 16px',
-                  fontSize: '0.86rem',
-                  fontWeight: 600,
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                }}
-              >
-                Ingresar en Modo Invitado / Demo
-              </button>
-            </div>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setLoginViewMode('pin')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '11px 16px',
+                    fontSize: '0.90rem',
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    border: '1px solid var(--accent)',
+                    color: 'var(--accent)',
+                    background: 'rgba(37,99,235,0.08)',
+                  }}
+                >
+                  <span>⚡ Acceso Rápido por PIN</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setLoginViewMode('email')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '10px 16px',
+                    fontSize: '0.86rem',
+                    fontWeight: 600,
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <span>✉️ Ingresar con Correo / Clave</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={handleGuestLogin}
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: '0.80rem',
+                    fontWeight: 500,
+                    borderRadius: 10,
+                    opacity: 0.75,
+                  }}
+                >
+                  Ingresar en Modo Invitado / Demo
+                </button>
+              </div>
+            ) : loginViewMode === 'pin' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
+                  Acceso Rápido de Equipo
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: '0.78rem', opacity: 0.8 }}>Selecciona tu perfil:</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setPinRole('benja')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: pinRole === 'benja' ? '2px solid var(--accent)' : '1px solid var(--border)',
+                        background: pinRole === 'benja' ? 'rgba(37,99,235,0.18)' : 'transparent',
+                        color: 'var(--text)',
+                        textAlign: 'left',
+                        fontSize: '0.85rem',
+                        fontWeight: pinRole === 'benja' ? 700 : 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🦁 Benjamín Chávez (Director Comercial)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPinRole('fco')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: pinRole === 'fco' ? '2px solid var(--accent)' : '1px solid var(--border)',
+                        background: pinRole === 'fco' ? 'rgba(37,99,235,0.18)' : 'transparent',
+                        color: 'var(--text)',
+                        textAlign: 'left',
+                        fontSize: '0.85rem',
+                        fontWeight: pinRole === 'fco' ? 700 : 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🤝 Francisco Inzunza (Socio Administrador)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPinRole('vendedor')}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: pinRole === 'vendedor' ? '2px solid var(--accent)' : '1px solid var(--border)',
+                        background: pinRole === 'vendedor' ? 'rgba(37,99,235,0.18)' : 'transparent',
+                        color: 'var(--text)',
+                        textAlign: 'left',
+                        fontSize: '0.85rem',
+                        fontWeight: pinRole === 'vendedor' ? 700 : 500,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      💼 Vendedor / Equipo en Terreno
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: '0.78rem', opacity: 0.8 }}>Ingresa PIN de seguridad (PIN inicial: 1234):</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={pinValue}
+                    onChange={(e) => setPinValue(e.target.value)}
+                    placeholder="••••"
+                    style={{
+                      padding: '10px 14px',
+                      fontSize: '1.2rem',
+                      letterSpacing: '6px',
+                      textAlign: 'center',
+                      borderRadius: 10,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handlePinLogin(pinRole, pinValue);
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => {
+                      setLoginViewMode('main');
+                      setPinValue('');
+                    }}
+                    style={{ flex: 1, padding: '10px', fontSize: '0.85rem', borderRadius: 10 }}
+                  >
+                    ← Volver
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={loginLoading || !pinValue}
+                    onClick={() => handlePinLogin(pinRole, pinValue)}
+                    style={{ flex: 2, padding: '10px', fontSize: '0.88rem', fontWeight: 700, borderRadius: 10 }}
+                  >
+                    {loginLoading ? 'Conectando...' : 'Entrar al Sistema'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleEmailAuth} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
+                  {isRegisterMode ? 'Crear Cuenta de Usuario' : 'Acceso con Correo'}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.76rem', opacity: 0.8 }}>Correo electrónico:</label>
+                  <input
+                    type="email"
+                    required
+                    value={emailVal}
+                    onChange={(e) => setEmailVal(e.target.value)}
+                    placeholder="tu@correo.com"
+                    style={{
+                      padding: '9px 12px',
+                      fontSize: '0.88rem',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.76rem', opacity: 0.8 }}>Contraseña:</label>
+                  <input
+                    type="password"
+                    required
+                    value={passVal}
+                    onChange={(e) => setPassVal(e.target.value)}
+                    placeholder="••••••••"
+                    style={{
+                      padding: '9px 12px',
+                      fontSize: '0.88rem',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={loginLoading}
+                  style={{
+                    padding: '11px',
+                    fontSize: '0.90rem',
+                    fontWeight: 700,
+                    borderRadius: 10,
+                    marginTop: 4,
+                  }}
+                >
+                  {loginLoading ? 'Procesando...' : isRegisterMode ? 'Registrarme e Ingresar' : 'Iniciar Sesión'}
+                </button>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsRegisterMode(!isRegisterMode)}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}
+                  >
+                    {isRegisterMode ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginViewMode('main')}
+                    style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 0 }}
+                  >
+                    ← Volver
+                  </button>
+                </div>
+              </form>
+            )}
 
             {/* MENSAJE DE ESTADO */}
             <div

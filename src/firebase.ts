@@ -5,6 +5,10 @@ import {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  updateProfile,
   signOut,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
@@ -28,5 +32,9 @@ export {
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  updateProfile,
   signOut,
 };

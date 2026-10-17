@@ -8,6 +8,17 @@ const config: CapacitorConfig = {
     // Apunta directamente a la versión publicada en GitHub Pages
     url: 'https://benjachavez34-bot.github.io/PRUEBA-VENTAS-SCORE/',
     cleartext: true,
+    allowNavigation: [
+      'firebaseapp.com',
+      '*.firebaseapp.com',
+      'web.app',
+      '*.web.app',
+      'google.com',
+      '*.google.com',
+      'accounts.google.com',
+      'googleapis.com',
+      '*.googleapis.com',
+    ],
   },
   android: {
     allowMixedContent: true,
