@@ -276,7 +276,8 @@ button:active {
   color: #fff;
 }
 
-.btn-red {
+.btn-red,
+.btn-danger {
   background: var(--accent2);
   color: #fff;
 }

@@ -2147,12 +2147,18 @@ export default function App() {
 
       // 5. Limpiar almacenamiento local
       try {
+        localStorage.removeItem('saved_user_session');
+        localStorage.removeItem('saved_user_pin');
         localStorage.removeItem('ventas_score_saved_session');
         localStorage.removeItem('perfil_usuario');
+        if (userEmail) {
+          localStorage.removeItem(`perfil_usuario_${userEmail.toLowerCase().trim()}`);
+        }
         localStorage.removeItem('auth_user');
         localStorage.removeItem('miNombre');
         localStorage.removeItem('sesion_activa_rol');
         localStorage.removeItem('pin_rapido_desbloqueo');
+        localStorage.removeItem('biometric_cred_id');
       } catch {}
 
       // 6. Cerrar sesión y resetear estados
