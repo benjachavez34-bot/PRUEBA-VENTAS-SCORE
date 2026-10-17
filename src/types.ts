@@ -7,6 +7,33 @@ export interface Producto {
 
 export type TipoMovimiento = 'entrada' | 'venta' | 'deuda' | 'pago';
 
+export type MedioPago = 'efectivo' | 'transferencia' | 'debito' | 'fiado' | 'mixto';
+
+export interface CartItem {
+  producto: Producto;
+  cant: number;
+  precioUnit: number;
+  subtotal: number;
+}
+
+export interface TicketVenta {
+  id: string;
+  items: CartItem[];
+  subtotal: number;
+  descuento: number;
+  total: number;
+  medioPago: MedioPago;
+  pagoCon?: number;
+  vuelto?: number;
+  cliente?: string;
+  telefono?: string;
+  fiadoMonto?: number;
+  efectivoMonto?: number;
+  ts: number;
+  fecha: string;
+  por: string;
+}
+
 export interface Movimiento {
   id?: string;
   tipo: TipoMovimiento;
@@ -21,6 +48,10 @@ export interface Movimiento {
   ts: number;
   fecha?: string;
   nota?: string;
+  ticketId?: string;
+  medioPago?: MedioPago;
+  pagoCon?: number;
+  vuelto?: number;
 }
 
 export interface CierreCaja {

@@ -28,8 +28,19 @@ import {
   deleteUser,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
-import { Producto, Movimiento, CierreCaja, Deudor, Cliente, Miembro, MensajeChat, EvaluacionVendedor } from './types';
+import {
+  Producto,
+  Movimiento,
+  CierreCaja,
+  Deudor,
+  Cliente,
+  Miembro,
+  MensajeChat,
+  EvaluacionVendedor,
+  CartItem,
+  TicketVenta,
+  MedioPago,
+} from './types';
 import {
   fTs,
   fmt,
@@ -335,7 +346,20 @@ export default function App() {
   const [movs, setMovs] = useState<Movimiento[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
 
-  // Venta Form State
+  // Punto de Venta (POS) & Carrito Multiproducto
+  const [posMode, setPosMode] = useState<'carrito' | 'rapida'>('carrito');
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [posProductoId, setPosProductoId] = useState<string>('');
+  const [posCantidad, setPosCantidad] = useState<string>('1');
+  const [posMedioPago, setPosMedioPago] = useState<MedioPago>('efectivo');
+  const [posPagoCon, setPosPagoCon] = useState<string>('');
+  const [posDescuento, setPosDescuento] = useState<string>('');
+  const [posCliente, setPosCliente] = useState<string>('');
+  const [posTelefono, setPosTelefono] = useState<string>('');
+  const [scannerPosOpen, setScannerPosOpen] = useState<boolean>(false);
+  const [modalTicket, setModalTicket] = useState<TicketVenta | null>(null);
+
+  // Venta Rápida (1 producto tradicional)
   const [vProductoId, setVProductoId] = useState<string>('');
   const [vCantidad, setVCantidad] = useState<string>('');
   const [vPrecio, setVPrecio] = useState<string>('');
@@ -1620,6 +1644,222 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       setVCliente('');
       setVTelefono('');
       setVFiado(false);
+    }
+  };
+
+  // ===================== POS & CARRITO MULTIPRODUCTO HANDLERS =====================
+  const handleAddToCart = (prodId: string, cantToAdd: number = 1) => {
+    const prod = productos.find((p) => p.id === prodId);
+    if (!prod) return;
+
+    const available = stockDe(prod.id, movs);
+    const existingInCart = cart.find((it) => it.producto.id === prod.id);
+    const currentCant = existingInCart ? existingInCart.cant : 0;
+    const targetCant = currentCant + cantToAdd;
+
+    if (targetCant > available) {
+      const confirmCont = window.confirm(
+        `El stock de ${prod.nombre} es ${available}. ¿Deseas agregar ${targetCant} al pedido de todas formas?`
+      );
+      if (!confirmCont) return;
+    }
+
+    const unitPrice = prod.precio || 0;
+    setCart((prev) => {
+      const idx = prev.findIndex((it) => it.producto.id === prod.id);
+      if (idx >= 0) {
+        const updated = [...prev];
+        const newCant = updated[idx].cant + cantToAdd;
+        updated[idx] = {
+          ...updated[idx],
+          cant: newCant,
+          subtotal: newCant * unitPrice,
+        };
+        return updated;
+      } else {
+        return [
+          ...prev,
+          {
+            producto: prod,
+            cant: cantToAdd,
+            precioUnit: unitPrice,
+            subtotal: cantToAdd * unitPrice,
+          },
+        ];
+      }
+    });
+    showToast(`+${cantToAdd} ${prod.nombre} al pedido`);
+  };
+
+  const handleUpdateCartCant = (prodId: string, newCant: number) => {
+    if (newCant <= 0) {
+      setCart((prev) => prev.filter((it) => it.producto.id !== prodId));
+      return;
+    }
+    setCart((prev) =>
+      prev.map((it) => {
+        if (it.producto.id === prodId) {
+          return {
+            ...it,
+            cant: newCant,
+            subtotal: newCant * it.precioUnit,
+          };
+        }
+        return it;
+      })
+    );
+  };
+
+  const handleRemoveFromCart = (prodId: string) => {
+    setCart((prev) => prev.filter((it) => it.producto.id !== prodId));
+  };
+
+  const handleClearCart = () => {
+    setCart([]);
+    setPosPagoCon('');
+    setPosDescuento('');
+    setPosCliente('');
+    setPosTelefono('');
+  };
+
+  const handleBarcodeScannedInPos = (barcode: string) => {
+    const clean = barcode.trim();
+    if (!clean) return;
+    setScannerPosOpen(false);
+
+    const match = identifyProductByBarcode(clean, productos);
+    const prod = match.existingProduct || productos.find((p) => p.codigoBarra === clean);
+    if (prod) {
+      handleAddToCart(prod.id, 1);
+    } else {
+      alert(`Código de barra ${clean} no encontrado en los productos registrados.`);
+    }
+  };
+
+  const handleCobrarCarrito = async () => {
+    if (cart.length === 0) {
+      alert('El carrito está vacío. Agrega al menos un producto para cobrar.');
+      return;
+    }
+
+    const subtotal = cart.reduce((sum, it) => sum + it.subtotal, 0);
+    const descuento = Math.max(0, parseFloat(posDescuento) || 0);
+    const total = Math.max(0, subtotal - descuento);
+    const cliente = posCliente.trim();
+    const tel = posTelefono.trim();
+
+    if (posMedioPago === 'fiado' && !cliente) {
+      alert('Para venta a fiado (crédito) debes ingresar el nombre del cliente.');
+      return;
+    }
+
+    let pagoCon = total;
+    let vuelto = 0;
+    if (posMedioPago === 'efectivo') {
+      const parsedPago = parseFloat(posPagoCon);
+      pagoCon = isNaN(parsedPago) ? total : parsedPago;
+      if (pagoCon < total) {
+        alert(`El monto ingresado ($${pagoCon}) es menor al total a pagar ($${total}).`);
+        return;
+      }
+      vuelto = Math.max(0, pagoCon - total);
+    }
+
+    // Guardar cliente y teléfono en el directorio si se ingresó
+    if (cliente && tel) {
+      handleGuardarCliente(cliente, tel);
+    }
+
+    const ticketId = 'tk_' + Date.now();
+    const isFiado = posMedioPago === 'fiado';
+
+    // Registrar cada item en movimientos (100% compatible con stockDe, cierres y reportes)
+    for (const it of cart) {
+      const ratio = subtotal > 0 ? it.subtotal / subtotal : 1 / cart.length;
+      const itemTotal = Math.round(it.subtotal - descuento * ratio);
+      await addMov({
+        tipo: 'venta',
+        productoId: it.producto.id,
+        producto: it.producto.nombre,
+        cant: it.cant,
+        total: itemTotal,
+        fiado: isFiado,
+        cliente: isFiado || cliente ? cliente : '',
+        ticketId,
+        medioPago: posMedioPago,
+        pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
+        vuelto: posMedioPago === 'efectivo' ? vuelto : undefined,
+      });
+    }
+
+    const ticketObj: TicketVenta = {
+      id: ticketId,
+      items: [...cart],
+      subtotal,
+      descuento,
+      total,
+      medioPago: posMedioPago,
+      pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
+      vuelto: posMedioPago === 'efectivo' ? vuelto : undefined,
+      cliente: cliente || undefined,
+      telefono: tel || undefined,
+      ts: Date.now(),
+      fecha: fTs(Date.now()),
+      por: miNombre,
+    };
+
+    handleClearCart();
+    setModalTicket(ticketObj);
+    showToast(`✓ Venta de ${fmt(total)} registrada con éxito`);
+  };
+
+  const handleEnviarTicketWhatsApp = (ticket: TicketVenta) => {
+    const docKey = (ticket.cliente || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const tel = ticket.telefono || clientes[docKey]?.telefono;
+
+    const itemsLines = ticket.items
+      .map((it) => `- ${it.cant}x ${it.producto.nombre} (${fmt(it.precioUnit)} c/u): ${fmt(it.subtotal)}`)
+      .join('\n');
+
+    let pagoDetalle = '';
+    if (ticket.medioPago === 'efectivo' && ticket.pagoCon) {
+      pagoDetalle = ` (Pago con: ${fmt(ticket.pagoCon)} | Vuelto: ${fmt(ticket.vuelto || 0)})`;
+    } else if (ticket.medioPago === 'fiado') {
+      pagoDetalle = ' (Queda pendiente en saldo deudor)';
+    }
+
+    const texto = `TICKET DE VENTA - VENTAS SCORE ⚡
+----------------------------------------
+Fecha: ${ticket.fecha}
+Atendido por: ${ticket.por}
+${ticket.cliente ? `Cliente: ${ticket.cliente}\n` : ''}
+PRODUCTOS:
+${itemsLines}
+----------------------------------------
+Subtotal: ${fmt(ticket.subtotal)}
+${ticket.descuento > 0 ? `Descuento: -${fmt(ticket.descuento)}\n` : ''}TOTAL: ${fmt(ticket.total)}
+Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
+
+¡Muchas gracias por tu compra en Ventas Score!
+----------------------------------------`;
+
+    if (tel && tel.replace(/\D/g, '').length >= 8) {
+      let cleanPhone = tel.replace(/\D/g, '');
+      if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+        cleanPhone = '56' + cleanPhone;
+      } else if (cleanPhone.length === 8) {
+        cleanPhone = '569' + cleanPhone;
+      }
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(texto)}`, '_blank');
+    } else {
+      setModalCliente({
+        isOpen: true,
+        nombre: ticket.cliente || 'Cliente',
+        telefono: '+56 9 ',
+        limiteCredito: '',
+        autoOpenWhatsApp: true,
+        mensajeWhatsApp: texto,
+      });
     }
   };
 
@@ -3424,108 +3664,554 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
             {/* VIEW VENTA */}
             {activeTab === 'venta' && (
               <section id="viewVenta">
-                <div className="card">
-                  <div className="row">
-                    <select
-                      value={vProductoId}
-                      onChange={(e) => handleVProductoChange(e.target.value)}
-                    >
-                      <option value="">
-                        {productos.length
-                          ? '-- Selecciona un producto --'
-                          : '-- Agrega productos en la pestaña Stock --'}
-                      </option>
-                      {productos.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.nombre} (stock: {stockDe(p.id, movs)})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <input
-                      type="number"
-                      placeholder="Cantidad"
-                      value={vCantidad}
-                      onChange={(e) => handleVCantidadChange(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Precio unit."
-                      value={vPrecio}
-                      onChange={(e) => handleVPrecioChange(e.target.value)}
-                    />
-                  </div>
-                  <div className="row">
-                    <input
-                      type="number"
-                      placeholder="Total $"
-                      value={vTotal}
-                      onChange={(e) => setVTotal(e.target.value)}
-                    />
-                  </div>
-                  <div className="row">
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        flex: 1,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={vFiado}
-                        onChange={(e) => setVFiado(e.target.checked)}
-                        style={{ flex: 'none', width: 'auto' }}
-                      />
-                      ¿Es fiado (queda debiendo)?
-                    </label>
-                  </div>
-                  {vFiado && (
-                    <div className="row" id="filaCliente" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                      <div>
-                        <input
-                          placeholder="Nombre del cliente fiado"
-                          list="listaClientes"
-                          value={vCliente}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setVCliente(val);
-                            const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                            if (clientes[k]?.telefono && (!vTelefono || vTelefono === '+56 9 ')) {
-                              setVTelefono(clientes[k].telefono || '');
-                            }
-                          }}
-                        />
-                        <datalist id="listaClientes">
-                          {clientNames.map((name) => (
-                            <option key={name} value={name} />
-                          ))}
-                        </datalist>
-                      </div>
-                      <div>
-                        <input
-                          type="tel"
-                          placeholder="WhatsApp (+56 9...)"
-                          value={vTelefono}
-                          onChange={(e) => setVTelefono(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <div className="row">
-                    <button className="btn-primary" onClick={handleRegistrarVenta}>
-                      Registrar venta
-                    </button>
-                  </div>
-                  {selectedVProd && (
-                    <div className="sub" style={{ marginTop: 6 }}>
-                      Stock disponible: {stockDe(selectedVProd.id, movs)}
-                    </div>
-                  )}
+                {/* SELECTOR DE MODO POS: CARRITO MULTIPRODUCTO VS VENTA RÁPIDA */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    className={posMode === 'carrito' ? 'btn-primary' : 'btn-ghost'}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      fontSize: '0.88rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                    onClick={() => setPosMode('carrito')}
+                  >
+                    <span>🛒 Carrito POS Multiproducto</span>
+                    {cart.length > 0 && (
+                      <span
+                        style={{
+                          background: '#fff',
+                          color: 'var(--accent)',
+                          padding: '1px 7px',
+                          borderRadius: 12,
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        {cart.reduce((s, it) => s + it.cant, 0)}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={posMode === 'rapida' ? 'btn-primary' : 'btn-ghost'}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      fontSize: '0.88rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                    onClick={() => setPosMode('rapida')}
+                  >
+                    <span>⚡ Venta Rápida (1 Producto)</span>
+                  </button>
                 </div>
+
+                {/* ==================== MODO 1: CARRITO POS MULTIPRODUCTO ==================== */}
+                {posMode === 'carrito' && (
+                  <div className="card" style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                      <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>🛒 Punto de Venta (POS)</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => setScannerPosOpen(true)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 12px',
+                          fontSize: '0.84rem',
+                          fontWeight: 700,
+                          background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
+                        }}
+                      >
+                        <span>📷 Escanear con Cámara</span>
+                      </button>
+                    </div>
+
+                    {/* SELECTOR RÁPIDO PARA AGREGAR AL CARRITO */}
+                    <div className="row" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 90px auto', gap: 8, marginBottom: 8 }}>
+                      <select
+                        value={posProductoId}
+                        onChange={(e) => setPosProductoId(e.target.value)}
+                        style={{ fontSize: '0.86rem' }}
+                      >
+                        <option value="">-- Elige un producto para agregar --</option>
+                        {productos.map((p) => {
+                          const stk = stockDe(p.id, movs);
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({fmt(p.precio || 0)} · stock: {stk})
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Cant"
+                        value={posCantidad}
+                        onChange={(e) => setPosCantidad(e.target.value)}
+                        style={{ fontSize: '0.86rem', textAlign: 'center' }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-green"
+                        style={{ padding: '8px 14px', fontSize: '0.85rem', fontWeight: 700 }}
+                        onClick={() => {
+                          if (!posProductoId) return alert('Selecciona un producto primero');
+                          const c = parseInt(posCantidad, 10) || 1;
+                          handleAddToCart(posProductoId, c);
+                          setPosProductoId('');
+                          setPosCantidad('1');
+                        }}
+                      >
+                        + Agregar
+                      </button>
+                    </div>
+
+                    {/* CHIPS RÁPIDOS DE PRODUCTOS FRECUENTES */}
+                    {productos.length > 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div className="sub" style={{ fontSize: '0.74rem', marginBottom: 6, fontWeight: 600 }}>
+                          ⚡ Acceso rápido (toca para sumar +1 al carrito):
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 85, overflowY: 'auto' }}>
+                          {productos.slice(0, 8).map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="btn-ghost"
+                              style={{
+                                fontSize: '0.74rem',
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                background: 'rgba(0,0,0,0.12)',
+                                border: '1px solid var(--border)',
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => handleAddToCart(p.id, 1)}
+                            >
+                              +1 {p.nombre} ({fmt(p.precio || 0)})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LISTADO DE ITEMS EN EL CARRITO */}
+                    <div style={{ background: 'var(--bg)', borderRadius: 10, padding: '10px 12px', border: '1px solid var(--border)', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
+                          📦 Productos en este pedido ({cart.length})
+                        </span>
+                        {cart.length > 0 && (
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            style={{ fontSize: '0.74rem', padding: '2px 8px', color: 'var(--accent2)' }}
+                            onClick={handleClearCart}
+                          >
+                            Vaciar carrito
+                          </button>
+                        )}
+                      </div>
+
+                      {cart.length === 0 ? (
+                        <div className="sub" style={{ textAlign: 'center', padding: '16px 0', fontStyle: 'italic', fontSize: '0.84rem' }}>
+                          🛒 El carrito está vacío. Elige productos arriba o escanea con la cámara.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {cart.map((it) => (
+                            <div
+                              key={it.producto.id}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingBottom: 6,
+                                borderBottom: '1px dashed var(--border)',
+                                gap: 6,
+                              }}
+                            >
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>{it.producto.nombre}</div>
+                                <div className="sub" style={{ fontSize: '0.75rem' }}>
+                                  {fmt(it.precioUnit)} c/u
+                                </div>
+                              </div>
+
+                              {/* CONTROLES DE CANTIDAD */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  style={{ padding: '2px 8px', fontSize: '0.85rem', fontWeight: 800 }}
+                                  onClick={() => handleUpdateCartCant(it.producto.id, it.cant - 1)}
+                                >
+                                  -
+                                </button>
+                                <span style={{ fontWeight: 800, minWidth: 24, textAlign: 'center', fontSize: '0.90rem' }}>
+                                  {it.cant}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn-ghost"
+                                  style={{ padding: '2px 8px', fontSize: '0.85rem', fontWeight: 800 }}
+                                  onClick={() => handleAddToCart(it.producto.id, 1)}
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              <div style={{ minWidth: 65, textAlign: 'right', fontWeight: 700, fontSize: '0.92rem' }}>
+                                {fmt(it.subtotal)}
+                              </div>
+
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                style={{ padding: '2px 6px', fontSize: '0.80rem', color: 'var(--muted)' }}
+                                onClick={() => handleRemoveFromCart(it.producto.id)}
+                                title="Quitar producto"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* MEDIOS DE PAGO, DESCUENTO Y COBRO (ACTIVO CUANDO HAY PRODUCTOS) */}
+                    {cart.length > 0 && (() => {
+                      const subtotal = cart.reduce((s, it) => s + it.subtotal, 0);
+                      const desc = Math.max(0, parseFloat(posDescuento) || 0);
+                      const total = Math.max(0, subtotal - desc);
+                      const parsedPago = parseFloat(posPagoCon);
+                      const pagoConVal = isNaN(parsedPago) ? total : parsedPago;
+                      const vueltoVal = Math.max(0, pagoConVal - total);
+
+                      return (
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                          {/* SUBTOTOTAL, DESCUENTO Y TOTAL */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <span className="sub">Subtotal productos:</span>
+                            <span style={{ fontWeight: 700 }}>{fmt(subtotal)}</span>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 10 }}>
+                            <span className="sub">Descuento o promo $:</span>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={posDescuento}
+                              onChange={(e) => setPosDescuento(e.target.value)}
+                              style={{ width: 110, fontSize: '0.86rem', textAlign: 'right' }}
+                            />
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '10px 14px',
+                              background: 'rgba(37,99,235,0.12)',
+                              border: '1px solid rgba(37,99,235,0.3)',
+                              borderRadius: 10,
+                              marginBottom: 12,
+                            }}
+                          >
+                            <span style={{ fontWeight: 800, fontSize: '1rem' }}>TOTAL A COBRAR:</span>
+                            <span style={{ fontWeight: 900, fontSize: '1.45rem', color: 'var(--accent)' }}>
+                              {fmt(total)}
+                            </span>
+                          </div>
+
+                          {/* SELECCIÓN DE MEDIO DE PAGO */}
+                          <div style={{ marginBottom: 12 }}>
+                            <label className="sub" style={{ display: 'block', fontWeight: 600, fontSize: '0.78rem', marginBottom: 6 }}>
+                              💳 Medio de Pago:
+                            </label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 6 }}>
+                              {[
+                                { id: 'efectivo', label: '💵 Efectivo' },
+                                { id: 'transferencia', label: '📱 Transf.' },
+                                { id: 'debito', label: '💳 Débito' },
+                                { id: 'fiado', label: '⏳ Fiado' },
+                                { id: 'mixto', label: '🔀 Mixto' },
+                              ].map((mp) => (
+                                <button
+                                  key={mp.id}
+                                  type="button"
+                                  className={posMedioPago === mp.id ? 'btn-primary' : 'btn-ghost'}
+                                  style={{
+                                    fontSize: '0.80rem',
+                                    fontWeight: 700,
+                                    padding: '7px 4px',
+                                    borderRadius: 6,
+                                  }}
+                                  onClick={() => setPosMedioPago(mp.id as MedioPago)}
+                                >
+                                  {mp.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* CALCULADORA DE VUELTO (PARA EFECTIVO O MIXTO) */}
+                          {(posMedioPago === 'efectivo' || posMedioPago === 'mixto') && (
+                            <div
+                              style={{
+                                background: 'rgba(0,0,0,0.15)',
+                                padding: '10px 12px',
+                                borderRadius: 10,
+                                border: '1px solid var(--border)',
+                                marginBottom: 12,
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <span style={{ fontWeight: 700, fontSize: '0.84rem' }}>
+                                  🧮 ¿Con cuánto paga el cliente?
+                                </span>
+                                {pagoConVal >= total ? (
+                                  <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#16a34a' }}>
+                                    Vuelto: {fmt(vueltoVal)}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#dc2626' }}>
+                                    Falta: {fmt(total - pagoConVal)}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                                <input
+                                  type="number"
+                                  placeholder={String(total)}
+                                  value={posPagoCon}
+                                  onChange={(e) => setPosPagoCon(e.target.value)}
+                                  style={{ fontSize: '1.1rem', fontWeight: 800, flex: 1 }}
+                                />
+                              </div>
+
+                              {/* BOTONES RÁPIDOS DE BILLETES */}
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {[
+                                  { label: 'Exacto', val: total },
+                                  { label: '$2.000', val: 2000 },
+                                  { label: '$5.000', val: 5000 },
+                                  { label: '$10.000', val: 10000 },
+                                  { label: '$20.000', val: 20000 },
+                                ].map((b, i) => (
+                                  <button
+                                    key={i}
+                                    type="button"
+                                    className="btn-ghost"
+                                    style={{
+                                      fontSize: '0.74rem',
+                                      padding: '3px 8px',
+                                      borderRadius: 4,
+                                      background: 'rgba(0,0,0,0.10)',
+                                    }}
+                                    onClick={() => setPosPagoCon(String(b.val))}
+                                  >
+                                    {b.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* DATOS DE CLIENTE & WHATSAPP (OBLIGATORIO EN FIADO, OPCIONAL EN OTRAS) */}
+                          <div style={{ marginBottom: 12 }}>
+                            <div className="sub" style={{ fontSize: '0.78rem', marginBottom: 4, fontWeight: 600 }}>
+                              {posMedioPago === 'fiado' ? '👤 Cliente Fiado (Obligatorio):' : '👤 Cliente (Opcional para enviar ticket):'}
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                              <div>
+                                <input
+                                  placeholder="Nombre cliente"
+                                  list="listaClientes"
+                                  value={posCliente}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setPosCliente(val);
+                                    const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+                                    if (clientes[k]?.telefono && (!posTelefono || posTelefono === '+56 9 ')) {
+                                      setPosTelefono(clientes[k].telefono || '');
+                                    }
+                                  }}
+                                  style={{ fontSize: '0.85rem' }}
+                                />
+                                <datalist id="listaClientes">
+                                  {clientNames.map((name) => (
+                                    <option key={name} value={name} />
+                                  ))}
+                                </datalist>
+                              </div>
+                              <div>
+                                <input
+                                  type="tel"
+                                  placeholder="WhatsApp (+56 9...)"
+                                  value={posTelefono}
+                                  onChange={(e) => setPosTelefono(e.target.value)}
+                                  style={{ fontSize: '0.85rem' }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* BOTÓN COBRAR Y FINALIZAR VENTA */}
+                          <div className="row">
+                            <button
+                              type="button"
+                              className="btn-primary"
+                              onClick={handleCobrarCarrito}
+                              style={{
+                                width: '100%',
+                                padding: '12px 18px',
+                                fontSize: '1.05rem',
+                                fontWeight: 800,
+                                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                                boxShadow: '0 4px 14px rgba(22,163,74,0.35)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 8,
+                              }}
+                            >
+                              <span>⚡ Cobrar {fmt(total)}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ==================== MODO 2: VENTA RÁPIDA (1 PRODUCTO TRADICIONAL) ==================== */}
+                {posMode === 'rapida' && (
+                  <div className="card">
+                    <div className="sub" style={{ fontWeight: 700, marginBottom: 8 }}>
+                      ⚡ Venta Rápida Tradicional (1 Producto a la vez):
+                    </div>
+                    <div className="row">
+                      <select
+                        value={vProductoId}
+                        onChange={(e) => handleVProductoChange(e.target.value)}
+                      >
+                        <option value="">
+                          {productos.length
+                            ? '-- Selecciona un producto --'
+                            : '-- Agrega productos en la pestaña Stock --'}
+                        </option>
+                        {productos.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre} (stock: {stockDe(p.id, movs)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="row">
+                      <input
+                        type="number"
+                        placeholder="Cantidad"
+                        value={vCantidad}
+                        onChange={(e) => handleVCantidadChange(e.target.value)}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Precio unit."
+                        value={vPrecio}
+                        onChange={(e) => handleVPrecioChange(e.target.value)}
+                      />
+                    </div>
+                    <div className="row">
+                      <input
+                        type="number"
+                        placeholder="Total $"
+                        value={vTotal}
+                        onChange={(e) => setVTotal(e.target.value)}
+                      />
+                    </div>
+                    <div className="row">
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          flex: 1,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={vFiado}
+                          onChange={(e) => setVFiado(e.target.checked)}
+                          style={{ flex: 'none', width: 'auto' }}
+                        />
+                        ¿Es fiado (queda debiendo)?
+                      </label>
+                    </div>
+                    {vFiado && (
+                      <div className="row" id="filaCliente" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                        <div>
+                          <input
+                            placeholder="Nombre del cliente fiado"
+                            list="listaClientes"
+                            value={vCliente}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setVCliente(val);
+                              const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+                              if (clientes[k]?.telefono && (!vTelefono || vTelefono === '+56 9 ')) {
+                                setVTelefono(clientes[k].telefono || '');
+                              }
+                            }}
+                          />
+                          <datalist id="listaClientes">
+                            {clientNames.map((name) => (
+                              <option key={name} value={name} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <div>
+                          <input
+                            type="tel"
+                            placeholder="WhatsApp (+56 9...)"
+                            value={vTelefono}
+                            onChange={(e) => setVTelefono(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="row">
+                      <button className="btn-primary" onClick={handleRegistrarVenta}>
+                        Registrar venta
+                      </button>
+                    </div>
+                    {selectedVProd && (
+                      <div className="sub" style={{ marginTop: 6 }}>
+                        Stock disponible: {stockDe(selectedVProd.id, movs)}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="card">
                   <div className="sub" style={{ marginBottom: 6, fontWeight: 600 }}>
@@ -3536,12 +4222,53 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
                       ultimasVentas.map((m) => (
                         <div className="item" key={m.id || m.ts}>
                           <div>
-                            <div className="name">
-                              {m.producto} x{m.cant}
+                            <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span>{m.producto} x{m.cant}</span>
+                              {m.medioPago && (
+                                <span
+                                  style={{
+                                    fontSize: '0.70rem',
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    background:
+                                      m.medioPago === 'efectivo'
+                                        ? 'rgba(22, 163, 74, 0.15)'
+                                        : m.medioPago === 'transferencia'
+                                        ? 'rgba(37, 99, 235, 0.15)'
+                                        : m.medioPago === 'debito'
+                                        ? 'rgba(147, 51, 234, 0.15)'
+                                        : m.medioPago === 'fiado'
+                                        ? 'rgba(220, 38, 38, 0.15)'
+                                        : 'rgba(234, 88, 12, 0.15)',
+                                    color:
+                                      m.medioPago === 'efectivo'
+                                        ? '#16a34a'
+                                        : m.medioPago === 'transferencia'
+                                        ? '#2563eb'
+                                        : m.medioPago === 'debito'
+                                        ? '#9333ea'
+                                        : m.medioPago === 'fiado'
+                                        ? '#dc2626'
+                                        : '#ea580c',
+                                  }}
+                                >
+                                  {m.medioPago === 'efectivo'
+                                    ? '💵 Efectivo'
+                                    : m.medioPago === 'transferencia'
+                                    ? '📱 Transf.'
+                                    : m.medioPago === 'debito'
+                                    ? '💳 Débito'
+                                    : m.medioPago === 'fiado'
+                                    ? '⏳ Fiado'
+                                    : '🔀 Mixto'}
+                                </span>
+                              )}
                             </div>
                             <div className="sub">
                               {m.fecha || ''}
                               {m.fiado ? ` · Fiado a ${m.cliente}` : ' · Pagado'}
+                              {m.pagoCon && m.vuelto !== undefined && m.vuelto > 0 ? ` · Vuelto: ${fmt(m.vuelto)}` : ''}
                               {m.por ? ` · ${m.por}` : ''}
                             </div>
                           </div>
@@ -4991,6 +5718,202 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
         </div>
       )}
 
+      {/* MODAL TICKET DIGITAL DE VENTA */}
+      {modalTicket && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalTicket(null)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 440,
+              width: '100%',
+              margin: 0,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+              border: '1px solid rgba(37,99,235,0.35)',
+              borderRadius: 16,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '1.5rem' }}>🧾</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>Ticket de Venta</div>
+                  <div className="sub" style={{ fontSize: '0.78rem' }}>
+                    {modalTicket.fecha} · Por: {modalTicket.por}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalTicket(null)}
+                style={{ fontSize: '1.1rem', padding: '4px 8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {modalTicket.cliente && (
+              <div
+                style={{
+                  background: 'rgba(37,99,235,0.08)',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(37,99,235,0.2)',
+                  marginBottom: 12,
+                  fontSize: '0.85rem',
+                }}
+              >
+                👤 Cliente: <b>{modalTicket.cliente}</b>
+                {modalTicket.telefono && <span className="sub"> ({modalTicket.telefono})</span>}
+              </div>
+            )}
+
+            {/* LISTA DE ITEMS */}
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.18)',
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6, color: 'var(--muted)' }}>
+                Detalle del Pedido
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {modalTicket.items.map((it, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '0.86rem',
+                    }}
+                  >
+                    <div>
+                      <b>{it.cant}x</b> {it.producto.nombre}
+                      <span className="sub" style={{ fontSize: '0.76rem', marginLeft: 4 }}>
+                        ({fmt(it.precioUnit)})
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 700 }}>{fmt(it.subtotal)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* TOTALES */}
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--border)', fontSize: '0.88rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span className="sub">Subtotal:</span>
+                  <span>{fmt(modalTicket.subtotal)}</span>
+                </div>
+                {modalTicket.descuento > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#16a34a' }}>
+                    <span>Descuento aplicado:</span>
+                    <span>-{fmt(modalTicket.descuento)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.15rem', fontWeight: 900, marginTop: 4 }}>
+                  <span>TOTAL:</span>
+                  <span style={{ color: 'var(--accent)' }}>{fmt(modalTicket.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* DETALLE DEL MEDIO DE PAGO */}
+            <div
+              style={{
+                background: 'rgba(0,0,0,0.12)',
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                marginBottom: 14,
+                fontSize: '0.85rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span className="sub">Medio de pago:</span>
+                <b style={{ textTransform: 'uppercase' }}>
+                  {modalTicket.medioPago === 'efectivo'
+                    ? '💵 Efectivo'
+                    : modalTicket.medioPago === 'transferencia'
+                    ? '📱 Transferencia'
+                    : modalTicket.medioPago === 'debito'
+                    ? '💳 Débito'
+                    : modalTicket.medioPago === 'fiado'
+                    ? '⏳ Fiado'
+                    : '🔀 Mixto'}
+                </b>
+              </div>
+              {modalTicket.medioPago === 'efectivo' && modalTicket.pagoCon && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, paddingTop: 4, borderTop: '1px dotted var(--border)' }}>
+                  <span className="sub">Pagó con {fmt(modalTicket.pagoCon)}:</span>
+                  <b style={{ color: '#16a34a' }}>Vuelto: {fmt(modalTicket.vuelto || 0)}</b>
+                </div>
+              )}
+            </div>
+
+            {/* ACCIONES: WHATSAPP Y NUEVA VENTA */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                type="button"
+                style={{
+                  background: '#25D366',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '10px 16px',
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  fontSize: '0.92rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(37,211,102,0.3)',
+                }}
+                onClick={() => handleEnviarTicketWhatsApp(modalTicket)}
+              >
+                <span>💬 Enviar Ticket por WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setModalTicket(null)}
+                style={{
+                  padding: '9px 16px',
+                  fontSize: '0.90rem',
+                  fontWeight: 700,
+                  background: 'var(--card)',
+                  color: 'var(--text)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                ✓ Cerrar y Nueva Venta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL BORRAR TODO */}
       {modalBorrarOpen && (
         <div
@@ -5808,6 +6731,13 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
         isOpen={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onScanSuccess={handleBarcodeScanned}
+      />
+
+      {/* MODAL SCANNER DE CÓDIGO DE BARRA POS CARRITO */}
+      <BarcodeScannerModal
+        isOpen={scannerPosOpen}
+        onClose={() => setScannerPosOpen(false)}
+        onScanSuccess={handleBarcodeScannedInPos}
       />
 
       {/* BANNER FLOTANTE DE MENSAJE NUEVO (ESTILO NOTIFICACIÓN PUSH EN PANTALLA) */}
