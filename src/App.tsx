@@ -880,9 +880,17 @@ export default function App() {
     const extraTxt = comprasFiadas.length > 3 ? ` y ${comprasFiadas.length - 3} compras más` : '';
     const detalleCompras = itemsTxt ? ` (${itemsTxt}${extraTxt})` : '';
 
-    const mensaje = `Hola *${d.nombre}*! 👋 Te saludamos cordialmente de *Ventas Score* ⚡.\n\nTe escribimos para recordarte que mantienes un saldo pendiente de *${fmt(
-      d.deuda
-    )}*${detalleCompras}.\n\n¿Nos confirmas si puedes realizar la transferencia o pago? ¡Muchas gracias por tu preferencia y que tengas un excelente día! 🥤`;
+    const mensaje = `Hola ${d.nombre}! Te saludamos de Ventas Score.
+
+Te escribimos para recordarte que mantienes un saldo pendiente de ${fmt(d.deuda)}${detalleCompras}.
+
+Si deseas transferir, te dejamos los datos de la cuenta:
+Nombre: Benjamin Chavez
+Rut: 20.627.873-0
+Banco: Bancoestado
+Tipo de cuenta: Cuenta Rut
+
+Por favor envianos el comprobante cuando realices la transferencia para actualizar tu cuenta de inmediato. Muchas gracias!`;
 
     if (tel && tel.replace(/\D/g, '').length >= 8) {
       let cleanPhone = tel.replace(/\D/g, '');
@@ -917,15 +925,19 @@ export default function App() {
     const tel = clientes[docKey]?.telefono;
     const fecha = fechaHora || fTs(Date.now());
 
-    const texto = `🧾 *COMPROBANTE DE ABONO - VENTAS SCORE* ⚡\n══════════════════════════\n👤 *Cliente:* ${nombre}\n💵 *Monto abonado:* ${fmt(
-      monto
-    )}\n📅 *Fecha:* ${fecha}\n👤 *Recibido por:* ${miNombre}\n\n📊 *Estado de Cuenta:*\n• Saldo anterior: ${fmt(
-      saldoAnterior
-    )}\n• Saldo restante: ${fmt(saldoRestante)}\n\n${
-      saldoRestante <= 0
-        ? '✨ *¡Tu cuenta ha quedado 100% al día! Muchas gracias.*'
-        : '¡Agradecemos tu puntual abono!'
-    }\n══════════════════════════`;
+    const texto = `COMPROBANTE DE ABONO - VENTAS SCORE
+----------------------------------------
+Cliente: ${nombre}
+Monto abonado: ${fmt(monto)}
+Fecha: ${fecha}
+Recibido por: ${miNombre}
+
+Estado de cuenta:
+Saldo anterior: ${fmt(saldoAnterior)}
+Saldo restante: ${fmt(saldoRestante)}
+
+${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu pago.' : 'Agradecemos tu puntual abono!'}
+----------------------------------------`;
 
     if (tel && tel.replace(/\D/g, '').length >= 8) {
       let cleanPhone = tel.replace(/\D/g, '');
