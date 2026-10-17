@@ -116,3 +116,19 @@ export interface MensajeChat {
   tipo?: 'general' | 'indicacion' | 'urgente';
 }
 
+export interface EvaluacionCriterios {
+  cumplimientoMetas: number; // 1 a 5
+  cobranzaFiado: number;     // 1 a 5
+  servicioCliente: number;   // 1 a 5
+  cuadraturaStock: number;   // 1 a 5
+}
+
+export interface EvaluacionVendedor {
+  vendedorNombre: string;
+  puntuacionGeneral: number; // 1.0 a 5.0
+  criterios: EvaluacionCriterios;
+  observacion?: string;
+  evaluadoPor: string;
+  evaluadoEn: number;
+}
+

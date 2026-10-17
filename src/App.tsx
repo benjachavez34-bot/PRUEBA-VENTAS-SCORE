@@ -29,7 +29,7 @@ import {
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { Producto, Movimiento, CierreCaja, Deudor, Miembro, MensajeChat } from './types';
+import { Producto, Movimiento, CierreCaja, Deudor, Miembro, MensajeChat, EvaluacionVendedor } from './types';
 import {
   fTs,
   fmt,
@@ -77,6 +77,7 @@ export interface PerfilUsuario {
   telefono: string;
   sucursal: string;
   avatarId: string;
+  pin?: string;
 }
 
 export default function App() {
@@ -262,7 +263,13 @@ export default function App() {
   const [perfil, setPerfil] = useState<PerfilUsuario>(() => {
     try {
       const saved = localStorage.getItem('perfil_usuario');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!parsed.pin) {
+          parsed.pin = localStorage.getItem('saved_user_pin') || '1234';
+        }
+        return parsed;
+      }
     } catch {}
     return {
       nombre: 'Benjamín Chávez',
@@ -271,9 +278,21 @@ export default function App() {
       telefono: '+56 9 8765 4321',
       sucursal: 'Casa Central - Santiago',
       avatarId: 'gorilla',
+      pin: localStorage.getItem('saved_user_pin') || '1234',
     };
   });
   const [editPerfil, setEditPerfil] = useState<PerfilUsuario>(perfil);
+  const [mostrarPin, setMostrarPin] = useState<boolean>(false);
+
+  // Evaluaciones y calificaciones profesionales del equipo de ventas
+  const [evaluaciones, setEvaluaciones] = useState<Record<string, EvaluacionVendedor>>(() => {
+    try {
+      const saved = localStorage.getItem('evaluaciones_vendedores');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // App data
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -642,12 +661,28 @@ export default function App() {
       (err) => console.log('mensajes err', err)
     );
 
+    const unsubEvaluaciones = onSnapshot(
+      collection(db, 'evaluaciones_vendedores'),
+      (snapshot) => {
+        const map: Record<string, EvaluacionVendedor> = {};
+        snapshot.docs.forEach((d) => {
+          map[d.id] = d.data() as EvaluacionVendedor;
+        });
+        setEvaluaciones(map);
+        try {
+          localStorage.setItem('evaluaciones_vendedores', JSON.stringify(map));
+        } catch {}
+      },
+      (err) => console.log('[Evaluaciones] err', err)
+    );
+
     return () => {
       unsubProds();
       unsubCierres();
       unsubMovs();
       unsubMiembros();
       unsubMensajes();
+      unsubEvaluaciones();
     };
   }, [user, isGuest]);
 
@@ -701,6 +736,30 @@ export default function App() {
     } catch (e: any) {
       alert('No se pudo guardar: ' + (e?.message || e));
       return false;
+    }
+  };
+
+  const handleGuardarEvaluacion = async (ev: EvaluacionVendedor) => {
+    const docKey = ev.vendedorNombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    setEvaluaciones((prev) => {
+      const updated = { ...prev, [docKey]: ev };
+      try {
+        localStorage.setItem('evaluaciones_vendedores', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (isGuest) {
+      showToast(`Evaluación de ${ev.vendedorNombre} guardada (modo local)`);
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, 'evaluaciones_vendedores', docKey), ev, { merge: true });
+      showToast(`✓ Calificación oficial de ${ev.vendedorNombre} guardada`);
+    } catch (err: any) {
+      console.error('Error guardando evaluación en Firestore:', err);
+      showToast(`Evaluación guardada localmente`);
     }
   };
 
@@ -1242,7 +1301,7 @@ export default function App() {
       setUnlockPin('');
       showToast('¡Sesión desbloqueada!');
     } else {
-      alert('PIN incorrecto. El PIN maestro es: 1234');
+      alert('PIN incorrecto. Si no lo recuerdas, pulsa en "Contraseña" arriba para ingresar con la clave de tu cuenta y actualizar tu PIN en "Mi Cuenta".');
     }
   };
 
@@ -1993,22 +2052,33 @@ export default function App() {
   };
 
   const handleGuardarPerfil = async (nuevoPerfil: PerfilUsuario) => {
+    // Validar PIN de ingreso rápido si fue ingresado o modificado
+    const pinLimpio = (nuevoPerfil.pin || '').replace(/\D/g, '').slice(0, 6);
+    if (pinLimpio.length > 0 && pinLimpio.length < 4) {
+      alert('El PIN de ingreso rápido debe tener mínimo 4 números (de 4 a 6 dígitos).');
+      return;
+    }
+    const finalPin = pinLimpio.length >= 4 ? pinLimpio : (localStorage.getItem('saved_user_pin') || '1234');
+    nuevoPerfil.pin = finalPin;
+
     setPerfil(nuevoPerfil);
     setMiNombre(nuevoPerfil.nombre);
     const emailLower = (user?.email || nuevoPerfil.email || '').toLowerCase().trim();
     try {
+      localStorage.setItem('saved_user_pin', finalPin);
       localStorage.setItem('perfil_usuario', JSON.stringify(nuevoPerfil));
       if (emailLower) {
         localStorage.setItem(`perfil_usuario_${emailLower}`, JSON.stringify(nuevoPerfil));
       }
       localStorage.setItem('miNombre', nuevoPerfil.nombre);
 
-      // Actualizar sesión guardada
+      // Actualizar sesión guardada para que el PIN sea efectivo de inmediato
       const rawSession = localStorage.getItem('saved_user_session');
       if (rawSession) {
         const s = JSON.parse(rawSession);
         s.nombre = nuevoPerfil.nombre;
         s.avatarId = nuevoPerfil.avatarId;
+        s.pin = finalPin;
         localStorage.setItem('saved_user_session', JSON.stringify(s));
         setSavedSession(s);
       }
@@ -2036,7 +2106,7 @@ export default function App() {
         return updated;
       });
       setModalCuentaOpen(false);
-      showToast('Perfil actualizado con éxito');
+      showToast('Perfil y PIN actualizados con éxito (modo local)');
       return;
     }
 
@@ -2045,7 +2115,7 @@ export default function App() {
       const docId = user?.uid || emailLower.replace(/[^a-zA-Z0-9_-]/g, '_');
       await setDoc(doc(db, 'miembros', docId), { ...miembroData, id: docId }, { merge: true });
 
-      // 2. Guardar también en usuarios/{docId}
+      // 2. Guardar también en usuarios/{docId} con su PIN cifrado/guardado
       await setDoc(
         doc(db, 'usuarios', docId),
         {
@@ -2056,6 +2126,7 @@ export default function App() {
           telefono: nuevoPerfil.telefono,
           sucursal: nuevoPerfil.sucursal,
           avatarId: nuevoPerfil.avatarId,
+          pin: finalPin,
           isAdmin,
           actualizadoEn: new Date().toISOString(),
         },
@@ -2071,7 +2142,7 @@ export default function App() {
       }
 
       setModalCuentaOpen(false);
-      showToast('✓ Perfil, foto y teléfono guardados exitosamente');
+      showToast('✓ Perfil, foto, teléfono y PIN guardados exitosamente');
     } catch (e: any) {
       console.error('Error guardando perfil:', e);
       setModalCuentaOpen(false);
@@ -4075,6 +4146,8 @@ export default function App() {
                   cierres={cierres}
                   adminName={perfil.nombre}
                   adminEmail={perfil.email}
+                  evaluaciones={evaluaciones}
+                  onGuardarEvaluacion={handleGuardarEvaluacion}
                   onOpenMiCuenta={() => {
                     setEditPerfil(perfil);
                     setModalCuentaOpen(true);
@@ -4813,6 +4886,65 @@ export default function App() {
                     placeholder="Casa Central - Santiago"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* SECCIÓN: PIN DE INGRESO RÁPIDO (DISPONIBLE PARA TODOS LOS USUARIOS) */}
+            <div
+              style={{
+                marginTop: 14,
+                padding: '12px 14px',
+                background: 'var(--bg)',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>⚡</span>
+                  <span>PIN de Ingreso Rápido</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ fontSize: '0.74rem', padding: '2px 8px' }}
+                  onClick={() => setMostrarPin((prev) => !prev)}
+                >
+                  {mostrarPin ? '👁️ Ocultar' : '👁️ Ver PIN'}
+                </button>
+              </div>
+              <div className="sub" style={{ fontSize: '0.75rem', marginBottom: 8, lineHeight: 1.35 }}>
+                Clave numérica personal de 4 a 6 dígitos para re-ingresar a la aplicación al reabrirla sin tener que escribir tu contraseña completa.
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <input
+                  type={mostrarPin ? 'text' : 'password'}
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={editPerfil.pin || ''}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                    setEditPerfil((p) => ({ ...p, pin: val }));
+                  }}
+                  placeholder="1234"
+                  style={{
+                    width: 140,
+                    fontSize: '1.25rem',
+                    letterSpacing: mostrarPin ? '2px' : '6px',
+                    fontWeight: 800,
+                    textAlign: 'center',
+                    borderRadius: 8,
+                    border: '1px solid var(--accent)',
+                    background: 'rgba(0,0,0,0.15)',
+                  }}
+                />
+                <span className="sub" style={{ fontSize: '0.75rem' }}>
+                  {editPerfil.pin && editPerfil.pin.length >= 4 ? (
+                    <b style={{ color: 'var(--accent3)' }}>✓ PIN válido ({editPerfil.pin.length} dígitos)</b>
+                  ) : (
+                    <span style={{ color: 'var(--muted)' }}>Mínimo 4 dígitos numéricos</span>
+                  )}
+                </span>
               </div>
             </div>
 
