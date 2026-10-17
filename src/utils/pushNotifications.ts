@@ -8,7 +8,17 @@ import { db } from '../firebase';
  * Si se ejecuta en un navegador web convencional, se omite de forma segura.
  */
 export async function initializePushNotifications(userId?: string) {
+  // Si estamos en entorno web (ej. PWA en Safari iOS o navegadores de escritorio)
   if (!Capacitor.isNativePlatform()) {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default' && userId) {
+        try {
+          await Notification.requestPermission();
+        } catch (e) {
+          console.log('[Push Web] Omitida solicitud de notificación:', e);
+        }
+      }
+    }
     return;
   }
 
