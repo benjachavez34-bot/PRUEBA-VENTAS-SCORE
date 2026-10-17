@@ -741,14 +741,42 @@ export default function App() {
     const unsubClientes = onSnapshot(
       collection(db, 'clientes'),
       (snapshot) => {
-        const map: Record<string, Cliente> = {};
+        const remoteMap: Record<string, Cliente> = {};
         snapshot.docs.forEach((d) => {
-          map[d.id] = { id: d.id, ...(d.data() as Omit<Cliente, 'id'>) };
+          remoteMap[d.id] = { id: d.id, ...(d.data() as Omit<Cliente, 'id'>) };
         });
-        setClientes(map);
+
+        // Cargar lo que tengamos en localStorage para proteger contra sobreescritura accidental
+        let localMap: Record<string, Cliente> = {};
         try {
-          localStorage.setItem('clientes_directorio', JSON.stringify(map));
+          const saved = localStorage.getItem('clientes_directorio');
+          if (saved) localMap = JSON.parse(saved);
         } catch {}
+
+        // Fusión inteligente: datos remotos tienen prioridad, pero no eliminamos clientes locales
+        const merged: Record<string, Cliente> = { ...localMap, ...remoteMap };
+
+        setClientes(merged);
+        try {
+          localStorage.setItem('clientes_directorio', JSON.stringify(merged));
+        } catch {}
+
+        // Si existen clientes guardados localmente que no están en Firestore, sincronizarlos a la nube automáticamente
+        if (!isGuest && Object.keys(localMap).length > 0) {
+          Object.entries(localMap).forEach(async ([key, cli]) => {
+            if (!remoteMap[key] && cli.telefono) {
+              try {
+                const cleanData: Record<string, any> = {};
+                Object.entries(cli).forEach(([k, v]) => {
+                  if (v !== undefined) cleanData[k] = v;
+                });
+                await setDoc(doc(db, 'clientes', key), cleanData, { merge: true });
+              } catch (e) {
+                console.error('[Clientes auto-sync error]:', e);
+              }
+            }
+          });
+        }
       },
       (err) => console.log('[Clientes] err', err)
     );
@@ -814,7 +842,11 @@ export default function App() {
     }
 
     try {
-      await addDoc(collection(db, 'movs'), movData);
+      const cleanData: Record<string, any> = {};
+      Object.entries(movData).forEach(([k, v]) => {
+        if (v !== undefined) cleanData[k] = v;
+      });
+      await addDoc(collection(db, 'movs'), cleanData);
       return true;
     } catch (e: any) {
       alert('No se pudo guardar: ' + (e?.message || e));
@@ -855,7 +887,11 @@ export default function App() {
   ) => {
     if (!nombre.trim()) return null;
     const cleanNombre = nombre.trim();
-    const docKey = cleanNombre.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const docKey = cleanNombre
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9_-]/g, '_');
     const existing = clientes[docKey];
 
     const nuevoCliente: Cliente = {
@@ -879,8 +915,12 @@ export default function App() {
 
     if (!isGuest) {
       try {
-        await setDoc(doc(db, 'clientes', docKey), nuevoCliente, { merge: true });
-      } catch (e) {
+        const cleanData: Record<string, any> = {};
+        Object.entries(nuevoCliente).forEach(([k, v]) => {
+          if (v !== undefined) cleanData[k] = v;
+        });
+        await setDoc(doc(db, 'clientes', docKey), cleanData, { merge: true });
+      } catch (e: any) {
         console.error('Error guardando cliente en Firestore:', e);
       }
     }
@@ -889,8 +929,13 @@ export default function App() {
 
   // Helper: Enviar cobranza / recordatorio de deuda por WhatsApp con 1 toque
   const handleWhatsAppRecordatorio = (d: Deudor) => {
-    const docKey = d.nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-    const tel = d.telefono || clientes[docKey]?.telefono;
+    const docKey = d.nombre.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]/g, '_');
+    let tel = d.telefono || clientes[docKey]?.telefono;
+    if (!tel) {
+      const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      const matchCli = Object.values(clientes).find((c) => norm(c.nombre) === norm(d.nombre));
+      if (matchCli?.telefono) tel = matchCli.telefono;
+    }
 
     // Resumen de las últimas compras adeudadas
     const clienteMovs = movs.filter(
@@ -945,8 +990,13 @@ Por favor envianos el comprobante cuando realices la transferencia para actualiz
     saldoRestante: number,
     fechaHora?: string
   ) => {
-    const docKey = nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-    const tel = clientes[docKey]?.telefono;
+    const docKey = nombre.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]/g, '_');
+    let tel = clientes[docKey]?.telefono;
+    if (!tel) {
+      const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      const matchCli = Object.values(clientes).find((c) => norm(c.nombre) === norm(nombre));
+      if (matchCli?.telefono) tel = matchCli.telefono;
+    }
     const fecha = fechaHora || fTs(Date.now());
 
     const texto = `COMPROBANTE DE ABONO - VENTAS SCORE
@@ -1632,6 +1682,7 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       total,
       fiado: vFiado,
       cliente: vFiado ? cliente : '',
+      telefono: vFiado && vTelefono.trim() ? vTelefono.trim() : undefined,
     });
 
     if (ok) {
@@ -1789,6 +1840,7 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
         medioPago: posMedioPago,
         pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
         vuelto: posMedioPago === 'efectivo' ? vuelto : undefined,
+        telefono: tel || undefined,
       });
     }
 
@@ -1910,12 +1962,14 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         total: monto,
         fiado: true,
         cliente: nombre,
+        telefono: dTelefono.trim() || undefined,
       });
     } else {
       ok = await addMov({
         tipo: 'deuda',
         total: monto,
         cliente: nombre,
+        telefono: dTelefono.trim() || undefined,
       });
     }
 

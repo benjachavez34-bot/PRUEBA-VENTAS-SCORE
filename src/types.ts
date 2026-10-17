@@ -52,6 +52,7 @@ export interface Movimiento {
   medioPago?: MedioPago;
   pagoCon?: number;
   vuelto?: number;
+  telefono?: string;
 }
 
 export interface CierreCaja {

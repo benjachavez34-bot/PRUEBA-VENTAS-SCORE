@@ -76,11 +76,36 @@ export function getDeudores(
   });
 
   const now = Date.now();
+  const normalize = (s: string) =>
+    s
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]/g, '');
 
   return Object.values(map)
     .map((item) => {
       const k = item.nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-      const clienteInfo = clientesMap ? clientesMap[k] : undefined;
+      const normKey = normalize(item.nombre);
+
+      let clienteInfo = clientesMap ? clientesMap[k] : undefined;
+      if (!clienteInfo && clientesMap) {
+        clienteInfo = Object.values(clientesMap).find(
+          (c) => normalize(c.nombre) === normKey || (c.id ? normalize(c.id) === normKey : false)
+        );
+      }
+
+      // Si aún no hay teléfono en el directorio, buscar si vino guardado en algún movimiento previo del cliente
+      let telEncontrado = clienteInfo?.telefono;
+      if (!telEncontrado) {
+        const mConTel = movs.find(
+          (m) => m.cliente && normalize(m.cliente) === normKey && m.telefono
+        );
+        if (mConTel?.telefono) {
+          telEncontrado = mConTel.telefono;
+        }
+      }
 
       const diasAntiguedad = item.primerDeudaTs
         ? Math.max(0, Math.floor((now - item.primerDeudaTs) / (1000 * 60 * 60 * 24)))
@@ -89,7 +114,7 @@ export function getDeudores(
       return {
         nombre: item.nombre,
         deuda: item.deuda,
-        telefono: clienteInfo?.telefono,
+        telefono: telEncontrado,
         limiteCredito: clienteInfo?.limiteCredito,
         primerDeudaTs: item.primerDeudaTs,
         ultimoMovimientoTs: item.ultimoMovimientoTs,
