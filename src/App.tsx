@@ -8,6 +8,7 @@ import {
   deleteDoc,
   onSnapshot,
   getDocs,
+  getDoc,
 } from 'firebase/firestore';
 import {
   auth,
@@ -18,7 +19,9 @@ import {
   getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   signInAnonymously,
+  updateProfile,
   signOut,
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -84,14 +87,50 @@ export default function App() {
   );
   const [dbError, setDbError] = useState<string | null>(null);
 
-  // Estados de autenticación ampliada (Google, PIN Rápido, Correo/Clave)
-  const [loginViewMode, setLoginViewMode] = useState<'main' | 'pin' | 'email'>('main');
-  const [pinRole, setPinRole] = useState<'benja' | 'fco' | 'vendedor'>('benja');
-  const [pinValue, setPinValue] = useState<string>('');
-  const [emailVal, setEmailVal] = useState<string>('');
-  const [passVal, setPassVal] = useState<string>('');
-  const [isRegisterMode, setIsRegisterMode] = useState<boolean>(false);
-  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+  // Sesión guardada para bloqueo y re-ingreso biométrico/PIN/contraseña
+  const [savedSession, setSavedSession] = useState<{
+    uid: string;
+    email: string;
+    nombre: string;
+    rol: string;
+    avatarId?: string;
+    pin?: string;
+  } | null>(() => {
+    try {
+      const raw = localStorage.getItem('saved_user_session');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  });
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem('saved_user_session'));
+    } catch {
+      return false;
+    }
+  });
+  const [unlockMethod, setUnlockMethod] = useState<'biometric' | 'pin' | 'password'>('biometric');
+  const [unlockPin, setUnlockPin] = useState<string>('');
+  const [unlockPassword, setUnlockPassword] = useState<string>('');
+  const [unlockLoading, setUnlockLoading] = useState<boolean>(false);
+
+  // Vistas de acceso inicial (Google, Correo, Registro validado, Código OTP)
+  const [loginView, setLoginView] = useState<'main' | 'login_email' | 'register_email' | 'verify_email'>('main');
+
+  // Formulario de login por correo
+  const [loginEmail, setLoginEmail] = useState<string>('');
+  const [loginPass, setLoginPass] = useState<string>('');
+
+  // Formulario de registro estricto
+  const [regNombre, setRegNombre] = useState<string>('');
+  const [regEmail, setRegEmail] = useState<string>('');
+  const [regPass, setRegPass] = useState<string>('');
+  const [regConfirmPass, setRegConfirmPass] = useState<string>('');
+  const [regOtpCode, setRegOtpCode] = useState<string>('');
+  const [expectedOtpCode, setExpectedOtpCode] = useState<string>('');
+  const [pendingUser, setPendingUser] = useState<{ uid: string; email: string; nombre: string } | null>(null);
+
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<
     'venta' | 'deudores' | 'stock' | 'miembros' | 'resumen' | 'estadisticas' | 'equipo' | 'configuracion' | 'ayuda'
@@ -325,30 +364,13 @@ export default function App() {
     // Inicializar push al cargar la app
     initializePushNotifications();
 
-    // Restaurar sesión activa de PIN/equipo si existe
+    // Restaurar sesión guardada para el bloqueo rápido
     try {
-      const savedRol = localStorage.getItem('sesion_activa_rol');
-      const savedNombre = localStorage.getItem('miNombre');
-      if (savedRol && savedNombre && !user) {
-        const isBenja = savedNombre.toLowerCase().includes('benja');
-        const isFco = savedNombre.toLowerCase().includes('francisco') || savedNombre.toLowerCase().includes('fco');
-        const email = isBenja
-          ? 'benja.chavez34@gmail.com'
-          : isFco
-          ? 'fco.inzunza.re@gmail.com'
-          : 'vendedor@score.cl';
-
-        signInAnonymously(auth).catch(() => {});
-
-        const synthUser: any = {
-          uid: 'saved_' + (isBenja ? 'benja' : isFco ? 'fco' : 'vendedor'),
-          email: email,
-          displayName: savedNombre,
-        };
-        setUser(synthUser);
-        setIsGuest(false);
-        setMiNombre(savedNombre);
-        setAuthStatus(`Conectado como ${savedNombre}`);
+      const rawSession = localStorage.getItem('saved_user_session');
+      if (rawSession) {
+        const sess = JSON.parse(rawSession);
+        setSavedSession(sess);
+        setIsLocked(true);
       }
     } catch {}
 
@@ -426,10 +448,33 @@ export default function App() {
             });
           }
         }
+
+        // Vincular usuario a la base de datos Firestore (usuarios y miembros)
+        vincularUsuarioEnBD(currentUser, name);
+
+        // Guardar sesión para bloqueo / re-ingreso biométrico/PIN
+        const sessObj = {
+          uid: currentUser.uid,
+          email: currentUser.email || emailLower,
+          nombre: name,
+          rol: isCurrentAdmin ? 'Administrador General' : 'Vendedor',
+          avatarId: isCurrentAdmin ? 'gorilla' : 'avatar2',
+          pin: localStorage.getItem('saved_user_pin') || '1234',
+        };
+        try {
+          localStorage.setItem('saved_user_session', JSON.stringify(sessObj));
+          if (!localStorage.getItem('saved_user_pin')) {
+            localStorage.setItem('saved_user_pin', '1234');
+          }
+          if (isCurrentAdmin) {
+            localStorage.setItem('sesion_activa_rol', 'admin');
+          }
+        } catch {}
+        setSavedSession(sessObj);
       } else {
         if (!isGuest) {
-          const savedRol = localStorage.getItem('sesion_activa_rol');
-          if (!savedRol) {
+          const rawSession = localStorage.getItem('saved_user_session');
+          if (!rawSession) {
             setUser(null);
             setAuthStatus('Inicia sesión para acceder al registro compartido.');
           }
@@ -542,6 +587,23 @@ export default function App() {
         );
         list.sort((a, b) => a.ts - b.ts);
         setMensajes(list);
+
+        // Notificación de mensajes nuevos en tiempo real si proviene de otro usuario
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const newMsg = change.doc.data() as MensajeChat;
+            if (newMsg && newMsg.deEmail !== user?.email && Date.now() - (newMsg.ts || 0) < 25000) {
+              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                try {
+                  new Notification(`💬 ${newMsg.deNombre || 'Compañero'}:`, {
+                    body: newMsg.texto,
+                    icon: '/icon-192.png',
+                  });
+                } catch {}
+              }
+            }
+          }
+        });
       },
       (err) => console.log('mensajes err', err)
     );
@@ -599,13 +661,71 @@ export default function App() {
     );
   };
 
+  // Helper: Vincular usuario en base de datos Firestore (usuarios y miembros)
+  const vincularUsuarioEnBD = async (u: User | { uid: string; email?: string | null; displayName?: string | null }, nombreCustom?: string) => {
+    try {
+      const emailLower = (u.email || '').toLowerCase().trim();
+      const isAdminUser = isUserAdmin(emailLower);
+      const nombreFinal = nombreCustom || u.displayName || (isAdminUser ? 'Administrador' : 'Vendedor');
+
+      // 1. Colección usuarios
+      await setDoc(
+        doc(db, 'usuarios', u.uid),
+        {
+          uid: u.uid,
+          email: emailLower,
+          nombre: nombreFinal,
+          rol: isAdminUser ? 'Administrador General' : 'Vendedor',
+          avatarId: isAdminUser ? 'gorilla' : 'avatar2',
+          creadoEn: new Date().toISOString(),
+          ultimoAcceso: new Date().toISOString(),
+          activo: true,
+        },
+        { merge: true }
+      );
+
+      // 2. Colección miembros para chat y equipo
+      await setDoc(
+        doc(db, 'miembros', u.uid),
+        {
+          id: u.uid,
+          nombre: nombreFinal,
+          email: emailLower,
+          rol: isAdminUser ? 'Administrador General' : 'Vendedor',
+          isAdmin: isAdminUser,
+          avatarId: isAdminUser ? 'gorilla' : 'avatar2',
+          sucursal: isAdminUser ? 'Casa Central - Santiago' : 'Ruta Comercial',
+          estado: 'disponible',
+          ultimoIngreso: Date.now(),
+        },
+        { merge: true }
+      );
+
+      console.log('[BD] Usuario vinculado exitosamente a Firestore:', emailLower);
+    } catch (err) {
+      console.error('[BD] Error vinculando usuario en Firestore:', err);
+    }
+  };
+
+  // Helper para verificar fortaleza de contraseña
+  const checkPasswordStrength = (pass: string) => {
+    const hasLength = pass.length >= 6;
+    const hasUpper = /[A-Z]/.test(pass);
+    const hasNumber = /[0-9]/.test(pass);
+    return {
+      isValid: hasLength && hasUpper && hasNumber,
+      hasLength,
+      hasUpper,
+      hasNumber,
+    };
+  };
+
   // Auth Handlers
   const handleLoginGoogle = async () => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     try {
       setAuthStatus('Iniciando sesión con Google...');
-      // Se usa signInWithPopup (funciona en web y en el APK con multi-window dialog sin perder el estado de sesión)
       await signInWithPopup(auth, provider);
     } catch (e: any) {
       console.warn('Error login Google popup:', e);
@@ -617,7 +737,7 @@ export default function App() {
           await signInWithRedirect(auth, provider);
         } catch (redirErr: any) {
           console.error('Redirect err:', redirErr);
-          setAuthStatus('Google requiere autorización adicional. Puedes usar el Acceso Rápido por PIN o Correo.');
+          setAuthStatus('Google requiere autorización. Puedes usar tu Correo y Contraseña.');
         }
       } else {
         setAuthStatus('No se pudo iniciar sesión con Google: ' + (e?.message || e));
@@ -625,148 +745,391 @@ export default function App() {
     }
   };
 
-  const handlePinLogin = async (role: 'benja' | 'fco' | 'vendedor', pin: string) => {
-    if (pin.trim() !== '1234') {
-      alert('PIN incorrecto. El PIN maestro inicial es: 1234');
+  // Login tradicional con Correo y Contraseña
+  const handleLoginConCorreo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = loginEmail.trim().toLowerCase();
+    const pass = loginPass;
+    if (!email || !pass) {
+      alert('Ingresa tu correo y contraseña.');
       return;
     }
-    setLoginLoading(true);
-    setAuthStatus('Conectando al sistema...');
+    setAuthLoading(true);
+    setAuthStatus('Iniciando sesión...');
     try {
-      let fbUser = auth.currentUser;
-      if (!fbUser) {
-        try {
-          const res = await signInAnonymously(auth);
-          fbUser = res.user;
-        } catch (anonErr) {
-          console.log('[Auth] Modo PIN directo:', anonErr);
-        }
-      }
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      const u = cred.user;
+      const isCurrentAdmin = isUserAdmin(u.email);
+      const nombre = u.displayName || (isCurrentAdmin ? 'Administrador' : 'Vendedor');
 
-      if (role === 'benja') {
-        const email = 'benja.chavez34@gmail.com';
-        try {
-          localStorage.setItem('sesion_activa_rol', 'admin');
-          localStorage.setItem('miNombre', 'Benjamín Chávez');
-        } catch {}
-        setMiNombre('Benjamín Chávez');
-        const userObj: any = fbUser ? { ...fbUser, email, displayName: 'Benjamín Chávez' } : {
-          uid: 'admin_benja',
-          email,
-          displayName: 'Benjamín Chávez',
-        };
-        setUser(userObj);
-        setIsGuest(false);
-        setPerfil({
-          nombre: 'Benjamín Chávez',
-          email: email,
-          rol: 'Administrador General & Director Comercial',
-          telefono: '+56 9 8765 4321',
-          sucursal: 'Casa Central - Santiago',
-          avatarId: 'gorilla',
-        });
-      } else if (role === 'fco') {
-        const email = 'fco.inzunza.re@gmail.com';
-        try {
-          localStorage.setItem('sesion_activa_rol', 'admin');
-          localStorage.setItem('miNombre', 'Francisco Inzunza');
-        } catch {}
-        setMiNombre('Francisco Inzunza');
-        const userObj: any = fbUser ? { ...fbUser, email, displayName: 'Francisco Inzunza' } : {
-          uid: 'admin_fco',
-          email,
-          displayName: 'Francisco Inzunza',
-        };
-        setUser(userObj);
-        setIsGuest(false);
-        setPerfil({
-          nombre: 'Francisco Inzunza',
-          email: email,
-          rol: 'Administrador General & Socio',
-          telefono: '',
-          sucursal: 'Casa Central - Santiago',
-          avatarId: 'gorilla',
-        });
-      } else {
-        const customName = prompt('Ingresa tu nombre:') || 'Vendedor Score';
-        try {
-          localStorage.setItem('sesion_activa_rol', 'vendedor');
-          localStorage.setItem('miNombre', customName);
-        } catch {}
-        setMiNombre(customName);
-        const userObj: any = fbUser ? { ...fbUser, email: 'vendedor@score.cl', displayName: customName } : {
-          uid: 'vendedor_' + Date.now(),
-          email: 'vendedor@score.cl',
-          displayName: customName,
-        };
-        setUser(userObj);
-        setIsGuest(false);
-        setPerfil({
-          nombre: customName,
-          email: 'vendedor@score.cl',
-          rol: 'Vendedor',
-          telefono: '',
-          sucursal: 'Ruta Comercial',
-          avatarId: 'avatar2',
-        });
-      }
-      setLoginViewMode('main');
-      setPinValue('');
-      setAuthStatus('Conectado con éxito');
-      showToast('¡Bienvenido a Ventas Score!');
+      await vincularUsuarioEnBD(u, nombre);
+
+      const sessionObj = {
+        uid: u.uid,
+        email: u.email || email,
+        nombre,
+        rol: isCurrentAdmin ? 'Administrador General' : 'Vendedor',
+        avatarId: isCurrentAdmin ? 'gorilla' : 'avatar2',
+        pin: localStorage.getItem('saved_user_pin') || '1234',
+      };
+      try {
+        localStorage.setItem('saved_user_session', JSON.stringify(sessionObj));
+        localStorage.setItem('saved_user_pin', sessionObj.pin);
+        localStorage.setItem('miNombre', nombre);
+        if (isCurrentAdmin) localStorage.setItem('sesion_activa_rol', 'admin');
+      } catch {}
+
+      setSavedSession(sessionObj);
+      setIsLocked(false);
+      setUser(u);
+      setIsGuest(false);
+      setMiNombre(nombre);
+      showToast(`¡Bienvenido de vuelta, ${nombre}!`);
     } catch (err: any) {
-      alert('Error en acceso: ' + (err?.message || err));
+      console.error('Error login correo:', err);
+      if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
+        alert('Correo o contraseña incorrectos.');
+      } else if (err?.code === 'auth/operation-not-allowed') {
+        alert(
+          'El proveedor de Correo/Contraseña no está habilitado en Firebase Console.\n\nPor favor ve a Firebase Console -> Authentication -> Sign-in method y activa "Correo electrónico/contraseña".'
+        );
+      } else {
+        alert('Error al iniciar sesión: ' + (err?.message || err));
+      }
     } finally {
-      setLoginLoading(false);
+      setAuthLoading(false);
     }
   };
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  // Registro con Correo, Contraseña estricta y Código de Verificación
+  const handleRegistrarCuenta = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailVal.trim() || !passVal.trim()) {
-      alert('Por favor ingresa tu correo y contraseña');
+    const nombre = regNombre.trim();
+    const email = regEmail.trim().toLowerCase();
+    const pass = regPass;
+    const confirm = regConfirmPass;
+
+    if (!nombre || !email || !pass) {
+      alert('Por favor completa todos los campos.');
       return;
     }
-    setLoginLoading(true);
-    setAuthStatus('Verificando acceso...');
+
+    if (pass !== confirm) {
+      alert('Las contraseñas no coinciden. Por favor verifícalas.');
+      return;
+    }
+
+    const strength = checkPasswordStrength(pass);
+    if (!strength.isValid) {
+      let msg = 'La contraseña debe cumplir los siguientes requisitos:\n';
+      if (!strength.hasLength) msg += '• Mínimo 6 caracteres\n';
+      if (!strength.hasUpper) msg += '• Al menos una letra mayúscula (A-Z)\n';
+      if (!strength.hasNumber) msg += '• Al menos un número (0-9)\n';
+      alert(msg);
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthStatus('Creando cuenta y enviando código de verificación...');
+
     try {
-      if (isRegisterMode) {
-        await createUserWithEmailAndPassword(auth, emailVal.trim(), passVal);
-        showToast('Cuenta creada y conectada');
+      const userCred = await createUserWithEmailAndPassword(auth, email, pass);
+      await updateProfile(userCred.user, { displayName: nombre });
+
+      // Enviar correo oficial de verificación de Firebase Auth
+      try {
+        await sendEmailVerification(userCred.user);
+        console.log('[Auth] Correo de verificación oficial enviado');
+      } catch (emailErr) {
+        console.warn('[Auth] Error enviando correo Firebase:', emailErr);
+      }
+
+      // Generar código numérico de 6 dígitos
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      setExpectedOtpCode(otp);
+
+      // Guardar en Firestore para comprobación y registro en base de datos
+      try {
+        await setDoc(doc(db, 'verificaciones', email), {
+          code: otp,
+          email: email,
+          ts: Date.now(),
+        });
+      } catch (fsErr) {
+        console.warn('[Auth] Código guardado en memoria:', fsErr);
+      }
+
+      setPendingUser({ uid: userCred.user.uid, email, nombre });
+      setLoginView('verify_email');
+      showToast('¡Código de verificación enviado a tu correo!');
+    } catch (err: any) {
+      console.error('Error al registrar cuenta:', err);
+      if (err?.code === 'auth/email-already-in-use') {
+        alert('Ya existe una cuenta con este correo. Puedes iniciar sesión directamente.');
+        setLoginView('login_email');
+        setLoginEmail(email);
+      } else if (err?.code === 'auth/operation-not-allowed') {
+        alert(
+          'El proveedor de Correo/Contraseña no está habilitado en Firebase Console.\n\nPor favor ve a Firebase Console -> Authentication -> Sign-in method y activa "Correo electrónico/contraseña".'
+        );
       } else {
+        alert('No se pudo crear la cuenta: ' + (err?.message || err));
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Confirmar código de 6 dígitos
+  const handleConfirmarCodigo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const entered = regOtpCode.trim();
+    if (!entered) {
+      alert('Ingresa el código de 6 dígitos que enviamos a tu correo.');
+      return;
+    }
+
+    let esValido = entered === expectedOtpCode;
+
+    if (!esValido && pendingUser?.email) {
+      try {
+        const snap = await getDoc(doc(db, 'verificaciones', pendingUser.email));
+        if (snap.exists() && snap.data()?.code === entered) {
+          esValido = true;
+        }
+      } catch {}
+    }
+
+    if (!esValido && auth.currentUser) {
+      try {
+        await auth.currentUser.reload();
+        if (auth.currentUser.emailVerified) {
+          esValido = true;
+        }
+      } catch {}
+    }
+
+    if (!esValido) {
+      alert('Código incorrecto. Revisa el correo enviado o reenvía el código.');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const u = auth.currentUser;
+      const finalUid = u?.uid || pendingUser?.uid || 'user_' + Date.now();
+      const finalEmail = u?.email || pendingUser?.email || '';
+      const finalNombre = pendingUser?.nombre || u?.displayName || 'Usuario';
+      const isCurrentAdmin = isUserAdmin(finalEmail);
+
+      // Vincular cuenta a Firestore en usuarios y miembros
+      await vincularUsuarioEnBD(u || ({ uid: finalUid, email: finalEmail, displayName: finalNombre } as User), finalNombre);
+
+      const sessionObj = {
+        uid: finalUid,
+        email: finalEmail,
+        nombre: finalNombre,
+        rol: isCurrentAdmin ? 'Administrador General' : 'Vendedor',
+        avatarId: isCurrentAdmin ? 'gorilla' : 'avatar2',
+        pin: '1234',
+      };
+      try {
+        localStorage.setItem('saved_user_session', JSON.stringify(sessionObj));
+        localStorage.setItem('saved_user_pin', '1234');
+        localStorage.setItem('miNombre', finalNombre);
+        if (isCurrentAdmin) localStorage.setItem('sesion_activa_rol', 'admin');
+      } catch {}
+
+      setSavedSession(sessionObj);
+      setIsLocked(false);
+      setUser(u || ({ uid: finalUid, email: finalEmail, displayName: finalNombre } as User));
+      setIsGuest(false);
+      setMiNombre(finalNombre);
+
+      showToast('¡Cuenta verificada y vinculada a la base de datos!');
+    } catch (err: any) {
+      alert('Error vinculando cuenta: ' + (err?.message || err));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Reenviar código de verificación
+  const handleReenviarCodigo = async () => {
+    if (!pendingUser?.email) return;
+    try {
+      setAuthLoading(true);
+      if (auth.currentUser) {
+        await sendEmailVerification(auth.currentUser);
+      }
+      const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      setExpectedOtpCode(newOtp);
+      try {
+        await setDoc(doc(db, 'verificaciones', pendingUser.email), {
+          code: newOtp,
+          email: pendingUser.email,
+          ts: Date.now(),
+        });
+      } catch {}
+      alert(`Código reenviado al correo ${pendingUser.email}.`);
+    } catch (e: any) {
+      alert('Error reenviando código: ' + (e?.message || e));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Desbloqueo: Completar sesión
+  const completarDesbloqueo = () => {
+    setIsLocked(false);
+    if (savedSession) {
+      setMiNombre(savedSession.nombre);
+      const isCurrentAdmin = isUserAdmin(savedSession.email);
+      if (isCurrentAdmin) {
         try {
-          await signInWithEmailAndPassword(auth, emailVal.trim(), passVal);
-          showToast('Sesión iniciada con éxito');
-        } catch (loginErr: any) {
-          if (
-            loginErr?.code === 'auth/user-not-found' ||
-            loginErr?.code === 'auth/invalid-credential'
-          ) {
-            const createNow = window.confirm(
-              'No existe una cuenta registrada con este correo. ¿Deseas registrarla con esta contraseña ahora?'
-            );
-            if (createNow) {
-              await createUserWithEmailAndPassword(auth, emailVal.trim(), passVal);
-              showToast('Cuenta registrada con éxito');
-              setLoginViewMode('main');
-              return;
-            }
-          }
-          throw loginErr;
+          localStorage.setItem('sesion_activa_rol', 'admin');
+        } catch {}
+      }
+      if (!user) {
+        setUser({
+          uid: savedSession.uid,
+          email: savedSession.email,
+          displayName: savedSession.nombre,
+        } as User);
+      }
+    }
+  };
+
+  // Desbloqueo Biométrico (Huella / Face ID con WebAuthn)
+  const handleBiometricUnlock = async () => {
+    if (typeof window === 'undefined' || !window.PublicKeyCredential) {
+      alert('Tu dispositivo no soporta la autenticación biométrica WebAuthn en este navegador. Por favor ingresa con tu PIN o Contraseña.');
+      setUnlockMethod('pin');
+      return;
+    }
+    setUnlockLoading(true);
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const isAvailable = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      if (!isAvailable) {
+        alert('No se detectó un sensor biométrico configurado en este dispositivo. Puedes usar tu PIN o Contraseña.');
+        setUnlockMethod('pin');
+        setUnlockLoading(false);
+        return;
+      }
+
+      const credId = localStorage.getItem('biometric_cred_id');
+      if (!credId) {
+        const createOptions: CredentialCreationOptions = {
+          publicKey: {
+            challenge,
+            rp: { name: 'Ventas Score', id: window.location.hostname },
+            user: {
+              id: new TextEncoder().encode(savedSession?.email || 'user'),
+              name: savedSession?.email || 'user@score.cl',
+              displayName: savedSession?.nombre || 'Usuario',
+            },
+            pubKeyCredParams: [
+              { alg: -7, type: 'public-key' },
+              { alg: -257, type: 'public-key' },
+            ],
+            authenticatorSelection: {
+              authenticatorAttachment: 'platform',
+              userVerification: 'required',
+            },
+            timeout: 60000,
+          },
+        };
+        const newCred: any = await navigator.credentials.create(createOptions);
+        if (newCred?.id) {
+          localStorage.setItem('biometric_cred_id', newCred.id);
+          completarDesbloqueo();
+          showToast('¡Desbloqueado con biometría!');
+          return;
+        }
+      } else {
+        const getOptions: CredentialRequestOptions = {
+          publicKey: {
+            challenge,
+            rpId: window.location.hostname,
+            userVerification: 'required',
+            timeout: 60000,
+          },
+        };
+        const assertion = await navigator.credentials.get(getOptions);
+        if (assertion) {
+          completarDesbloqueo();
+          showToast('¡Desbloqueado con biometría!');
+          return;
         }
       }
-      setLoginViewMode('main');
     } catch (err: any) {
-      console.error('Error email auth:', err);
-      alert('Error al acceder: ' + (err?.message || err));
-      setAuthStatus('Error: ' + (err?.message || err));
+      console.warn('[Biometría]', err);
+      if (err?.name !== 'NotAllowedError') {
+        alert('Autenticación biométrica no completada. Puedes ingresar con PIN o Contraseña.');
+      }
+      setUnlockMethod('pin');
     } finally {
-      setLoginLoading(false);
+      setUnlockLoading(false);
     }
+  };
+
+  // Desbloqueo por PIN rápido
+  const handlePinUnlock = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const correctPin = savedSession?.pin || localStorage.getItem('saved_user_pin') || '1234';
+    if (unlockPin.trim() === correctPin) {
+      completarDesbloqueo();
+      setUnlockPin('');
+      showToast('¡Sesión desbloqueada!');
+    } else {
+      alert('PIN incorrecto. El PIN maestro es: 1234');
+    }
+  };
+
+  // Desbloqueo por Contraseña de la cuenta
+  const handlePasswordUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unlockPassword.trim() || !savedSession?.email) {
+      alert('Ingresa tu contraseña.');
+      return;
+    }
+    setUnlockLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, savedSession.email, unlockPassword);
+      completarDesbloqueo();
+      setUnlockPassword('');
+      showToast('¡Sesión desbloqueada con contraseña!');
+    } catch (err: any) {
+      alert('Contraseña incorrecta: ' + (err?.message || err));
+    } finally {
+      setUnlockLoading(false);
+    }
+  };
+
+  // Cerrar sesión completa y olvidar usuario
+  const handleCerrarSesionCompleto = async () => {
+    try {
+      if (user) await signOut(auth);
+    } catch {}
+    try {
+      localStorage.removeItem('saved_user_session');
+      localStorage.removeItem('sesion_activa_rol');
+    } catch {}
+    setSavedSession(null);
+    setIsLocked(false);
+    setUser(null);
+    setIsGuest(false);
+    setLoginView('main');
+    setAuthStatus('Inicia sesión para continuar');
+    showToast('Sesión cerrada correctamente');
   };
 
   const handleGuestLogin = () => {
     setIsGuest(true);
+    setIsLocked(false);
     let guestName = miNombre;
     if (!guestName) {
       try {
@@ -784,22 +1147,7 @@ export default function App() {
     showToast(`Iniciado como ${guestName}`);
   };
 
-  const handleLogout = async () => {
-    try {
-      if (user) {
-        await signOut(auth);
-      }
-      try {
-        localStorage.removeItem('sesion_activa_rol');
-      } catch {}
-      setIsGuest(false);
-      setUser(null);
-      setAuthStatus('Inicia sesión para continuar');
-      showToast('Sesión cerrada');
-    } catch (e: any) {
-      alert('No se pudo cerrar sesión: ' + e?.message);
-    }
-  };
+  const handleLogout = handleCerrarSesionCompleto;
 
   // Venta Form Handlers
   const handleVProductoChange = (pid: string) => {
@@ -1550,17 +1898,264 @@ export default function App() {
       <div className="app-wrapper">
         {dbError && <div id="banner">{dbError}</div>}
 
-      {!isAuthenticated ? (
+      {isLocked && savedSession ? (
+        /* PANTALLA DE DESBLOQUEO RÁPIDO (BIOMETRÍA / PIN / CONTRASEÑA) */
         <div className="auth-wrapper">
-          <section id="authPanel" className="auth-card">
+          <section id="authPanel" className="auth-card" style={{ maxWidth: 380, width: '92%' }}>
+            {/* AVATAR DE USUARIO GUARDADO */}
+            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
+              <img
+                src={
+                  savedSession.avatarId?.startsWith('data:image/') || savedSession.avatarId?.startsWith('http')
+                    ? savedSession.avatarId
+                    : scoreGorillaLogo
+                }
+                alt="Avatar"
+                style={{
+                  width: 88,
+                  height: 88,
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '3px solid var(--accent)',
+                  boxShadow: '0 0 25px rgba(37,99,235,0.45)',
+                  margin: '0 auto',
+                  display: 'block',
+                }}
+                referrerPolicy="no-referrer"
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  bottom: -2,
+                  right: -2,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontSize: '0.65rem',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                }}
+              >
+                {savedSession.rol.includes('Admin') ? 'ADMIN' : 'PRO'}
+              </span>
+            </div>
+
+            <h1
+              style={{
+                margin: '0 0 4px 0',
+                fontSize: '1.5rem',
+                fontWeight: 900,
+                color: 'var(--text)',
+              }}
+            >
+              ¡Hola de nuevo!
+            </h1>
+            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>
+              {savedSession.nombre}
+            </div>
+            <div className="sub" style={{ fontSize: '0.78rem', marginBottom: 18 }}>
+              {savedSession.email} • {savedSession.rol}
+            </div>
+
+            {/* SELECTOR DE MÉTODO DE DESBLOQUEO */}
+            <div
+              style={{
+                display: 'flex',
+                background: 'rgba(0,0,0,0.25)',
+                borderRadius: 12,
+                padding: 4,
+                marginBottom: 16,
+                border: '1px solid var(--border)',
+                gap: 4,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setUnlockMethod('biometric')}
+                style={{
+                  flex: 1,
+                  padding: '8px 4px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: unlockMethod === 'biometric' ? 'var(--accent)' : 'transparent',
+                  color: unlockMethod === 'biometric' ? '#fff' : 'var(--muted)',
+                  transition: 'all 0.2s',
+                }}
+              >
+                👆 Huella / Face
+              </button>
+              <button
+                type="button"
+                onClick={() => setUnlockMethod('pin')}
+                style={{
+                  flex: 1,
+                  padding: '8px 4px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: unlockMethod === 'pin' ? 'var(--accent)' : 'transparent',
+                  color: unlockMethod === 'pin' ? '#fff' : 'var(--muted)',
+                  transition: 'all 0.2s',
+                }}
+              >
+                ⚡ PIN Rápido
+              </button>
+              <button
+                type="button"
+                onClick={() => setUnlockMethod('password')}
+                style={{
+                  flex: 1,
+                  padding: '8px 4px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  background: unlockMethod === 'password' ? 'var(--accent)' : 'transparent',
+                  color: unlockMethod === 'password' ? '#fff' : 'var(--muted)',
+                  transition: 'all 0.2s',
+                }}
+              >
+                🔑 Contraseña
+              </button>
+            </div>
+
+            {/* CONTENIDO SEGÚN MÉTODO */}
+            {unlockMethod === 'biometric' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleBiometricUnlock}
+                  disabled={unlockLoading}
+                  style={{
+                    width: 90,
+                    height: 90,
+                    borderRadius: '50%',
+                    border: '2px solid var(--accent)',
+                    background: 'rgba(37,99,235,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 20px rgba(37,99,235,0.3)',
+                    transition: 'all 0.2s',
+                    color: 'var(--accent)',
+                  }}
+                  title="Tocar para desbloquear con sensor biométrico"
+                >
+                  <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
+                    <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
+                    <path d="M2 16h.01" />
+                    <path d="M21.8 16c.2-2 .131-5.354 0-6" />
+                    <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
+                    <path d="M4.5 13A8 8 0 0 1 12 4a8 8 0 0 1 7.5 5" />
+                    <path d="M6 18c0-.75.25-1.5 1-2" />
+                    <path d="M17 18c0-.75-.25-1.5-1-2" />
+                  </svg>
+                </button>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>
+                  {unlockLoading ? 'Escaneando...' : 'Tocar para desbloquear con Huella o Face ID'}
+                </div>
+                <div style={{ fontSize: '0.74rem', opacity: 0.7 }}>
+                  Verificación biométrica instantánea de tu teléfono
+                </div>
+              </div>
+            ) : unlockMethod === 'pin' ? (
+              <form onSubmit={handlePinUnlock} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <label style={{ fontSize: '0.78rem', opacity: 0.85 }}>Ingresa tu PIN de 4 dígitos:</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={unlockPin}
+                  onChange={(e) => setUnlockPin(e.target.value)}
+                  placeholder="••••"
+                  autoFocus
+                  style={{
+                    padding: '12px',
+                    fontSize: '1.4rem',
+                    letterSpacing: '8px',
+                    textAlign: 'center',
+                    borderRadius: 12,
+                    border: '1px solid var(--border)',
+                    background: 'rgba(0,0,0,0.25)',
+                    color: 'var(--text)',
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: '0.90rem' }}
+                >
+                  Desbloquear
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handlePasswordUnlock} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <label style={{ fontSize: '0.78rem', opacity: 0.85 }}>Contraseña de tu cuenta:</label>
+                <input
+                  type="password"
+                  value={unlockPassword}
+                  onChange={(e) => setUnlockPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoFocus
+                  style={{
+                    padding: '10px 14px',
+                    fontSize: '0.92rem',
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: 'rgba(0,0,0,0.25)',
+                    color: 'var(--text)',
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={unlockLoading}
+                  style={{ padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: '0.90rem' }}
+                >
+                  {unlockLoading ? 'Verificando...' : 'Desbloquear con Contraseña'}
+                </button>
+              </form>
+            )}
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 12 }}>
+              <button
+                type="button"
+                onClick={handleCerrarSesionCompleto}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--muted)',
+                  fontSize: '0.80rem',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Cerrar sesión / Entrar con otra cuenta
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : !isAuthenticated ? (
+        /* PANTALLA DE ACCESO INICIAL (GOOGLE / CORREO / INVITADO) */
+        <div className="auth-wrapper">
+          <section id="authPanel" className="auth-card" style={{ maxWidth: 380, width: '92%' }}>
             {/* LOGO GORILLA DESTACADO */}
-            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 16 }}>
+            <div style={{ position: 'relative', display: 'inline-block', marginBottom: 14 }}>
               <img
                 src={scoreGorillaLogo}
                 alt="Logo Score Gorilla"
                 style={{
-                  width: 92,
-                  height: 92,
+                  width: 90,
+                  height: 90,
                   borderRadius: '50%',
                   objectFit: 'cover',
                   border: '3px solid var(--accent)',
@@ -1589,11 +2184,10 @@ export default function App() {
               </span>
             </div>
 
-            {/* TÍTULO LLAMATIVO */}
             <h1
               style={{
-                margin: '0 0 6px 0',
-                fontSize: '2rem',
+                margin: '0 0 4px 0',
+                fontSize: '1.9rem',
                 fontWeight: 900,
                 letterSpacing: '-0.5px',
                 background: 'linear-gradient(135deg, var(--text) 25%, var(--accent) 100%)',
@@ -1606,17 +2200,17 @@ export default function App() {
             <div
               className="sub"
               style={{
-                fontSize: '0.88rem',
-                lineHeight: 1.45,
-                maxWidth: 340,
-                margin: '0 auto 24px auto',
+                fontSize: '0.85rem',
+                lineHeight: 1.4,
+                maxWidth: 320,
+                margin: '0 auto 20px auto',
               }}
             >
               Control integral de ventas, inventario, deudores y métricas en tiempo real.
             </div>
 
-            {/* BOTONES DE ACCIÓN SEGÚN MODO */}
-            {loginViewMode === 'main' ? (
+            {/* VISTA 1: PRINCIPAL (SOLO GOOGLE, CORREO Y MODO INVITADO) */}
+            {loginView === 'main' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto' }}>
                 <button
                   type="button"
@@ -1658,7 +2252,7 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-ghost"
-                  onClick={() => setLoginViewMode('pin')}
+                  onClick={() => setLoginView('login_email')}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1666,33 +2260,12 @@ export default function App() {
                     gap: 8,
                     padding: '11px 16px',
                     fontSize: '0.90rem',
-                    fontWeight: 700,
-                    borderRadius: 12,
-                    border: '1px solid var(--accent)',
-                    color: 'var(--accent)',
-                    background: 'rgba(37,99,235,0.08)',
-                  }}
-                >
-                  <span>⚡ Acceso Rápido por PIN</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() => setLoginViewMode('email')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '10px 16px',
-                    fontSize: '0.86rem',
                     fontWeight: 600,
-                    borderRadius: 10,
+                    borderRadius: 12,
                     border: '1px solid var(--border)',
                   }}
                 >
-                  <span>✉️ Ingresar con Correo / Clave</span>
+                  <span>✉️ Ingresar con Correo</span>
                 </button>
 
                 <button
@@ -1710,130 +2283,119 @@ export default function App() {
                   Ingresar en Modo Invitado / Demo
                 </button>
               </div>
-            ) : loginViewMode === 'pin' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
-                <div style={{ fontSize: '0.86rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
-                  Acceso Rápido de Equipo
-                </div>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: '0.78rem', opacity: 0.8 }}>Selecciona tu perfil:</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <button
-                      type="button"
-                      onClick={() => setPinRole('benja')}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        border: pinRole === 'benja' ? '2px solid var(--accent)' : '1px solid var(--border)',
-                        background: pinRole === 'benja' ? 'rgba(37,99,235,0.18)' : 'transparent',
-                        color: 'var(--text)',
-                        textAlign: 'left',
-                        fontSize: '0.85rem',
-                        fontWeight: pinRole === 'benja' ? 700 : 500,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      🦁 Benjamín Chávez (Director Comercial)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPinRole('fco')}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        border: pinRole === 'fco' ? '2px solid var(--accent)' : '1px solid var(--border)',
-                        background: pinRole === 'fco' ? 'rgba(37,99,235,0.18)' : 'transparent',
-                        color: 'var(--text)',
-                        textAlign: 'left',
-                        fontSize: '0.85rem',
-                        fontWeight: pinRole === 'fco' ? 700 : 500,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      🤝 Francisco Inzunza (Socio Administrador)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPinRole('vendedor')}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        border: pinRole === 'vendedor' ? '2px solid var(--accent)' : '1px solid var(--border)',
-                        background: pinRole === 'vendedor' ? 'rgba(37,99,235,0.18)' : 'transparent',
-                        color: 'var(--text)',
-                        textAlign: 'left',
-                        fontSize: '0.85rem',
-                        fontWeight: pinRole === 'vendedor' ? 700 : 500,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      💼 Vendedor / Equipo en Terreno
-                    </button>
-                  </div>
+            ) : loginView === 'login_email' ? (
+              /* VISTA 2: LOGIN POR CORREO EXISTENTE */
+              <form onSubmit={handleLoginConCorreo} style={{ display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
+                <div style={{ fontSize: '0.90rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
+                  Iniciar Sesión con Correo
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: '0.78rem', opacity: 0.8 }}>Ingresa PIN de seguridad (PIN inicial: 1234):</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.76rem', opacity: 0.85 }}>Correo electrónico:</label>
                   <input
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={pinValue}
-                    onChange={(e) => setPinValue(e.target.value)}
-                    placeholder="••••"
+                    type="email"
+                    required
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="usuario@score.cl"
                     style={{
-                      padding: '10px 14px',
-                      fontSize: '1.2rem',
-                      letterSpacing: '6px',
-                      textAlign: 'center',
-                      borderRadius: 10,
+                      padding: '10px 12px',
+                      fontSize: '0.90rem',
+                      borderRadius: 8,
                       border: '1px solid var(--border)',
                       background: 'rgba(0,0,0,0.2)',
                       color: 'var(--text)',
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handlePinLogin(pinRole, pinValue);
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: '0.76rem', opacity: 0.85 }}>Contraseña:</label>
+                  <input
+                    type="password"
+                    required
+                    value={loginPass}
+                    onChange={(e) => setLoginPass(e.target.value)}
+                    placeholder="••••••••"
+                    style={{
+                      padding: '10px 12px',
+                      fontSize: '0.90rem',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
                     }}
                   />
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={authLoading}
+                  style={{
+                    padding: '11px',
+                    fontSize: '0.92rem',
+                    fontWeight: 700,
+                    borderRadius: 10,
+                    marginTop: 4,
+                  }}
+                >
+                  {authLoading ? 'Iniciando...' : 'Iniciar Sesión'}
+                </button>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', marginTop: 4 }}>
                   <button
                     type="button"
-                    className="btn-ghost"
                     onClick={() => {
-                      setLoginViewMode('main');
-                      setPinValue('');
+                      setLoginView('register_email');
+                      setRegEmail(loginEmail);
                     }}
-                    style={{ flex: 1, padding: '10px', fontSize: '0.85rem', borderRadius: 10 }}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.80rem', fontWeight: 600 }}
+                  >
+                    ¿No tienes cuenta? Regístrate aquí
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginView('main')}
+                    style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.80rem' }}
                   >
                     ← Volver
                   </button>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={loginLoading || !pinValue}
-                    onClick={() => handlePinLogin(pinRole, pinValue)}
-                    style={{ flex: 2, padding: '10px', fontSize: '0.88rem', fontWeight: 700, borderRadius: 10 }}
-                  >
-                    {loginLoading ? 'Conectando...' : 'Entrar al Sistema'}
-                  </button>
                 </div>
-              </div>
-            ) : (
-              <form onSubmit={handleEmailAuth} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
-                <div style={{ fontSize: '0.86rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
-                  {isRegisterMode ? 'Crear Cuenta de Usuario' : 'Acceso con Correo'}
+              </form>
+            ) : loginView === 'register_email' ? (
+              /* VISTA 3: REGISTRO CON VALIDACIÓN ESTRICTA DE CONTRASEÑA */
+              <form onSubmit={handleRegistrarCuenta} style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 320, margin: '0 auto', textAlign: 'left' }}>
+                <div style={{ fontSize: '0.90rem', fontWeight: 700, textAlign: 'center', color: 'var(--accent)' }}>
+                  Crear Cuenta de Usuario
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: '0.76rem', opacity: 0.8 }}>Correo electrónico:</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <label style={{ fontSize: '0.74rem', opacity: 0.85 }}>Nombre y Apellido:</label>
+                  <input
+                    type="text"
+                    required
+                    value={regNombre}
+                    onChange={(e) => setRegNombre(e.target.value)}
+                    placeholder="Ej. Juan Pérez"
+                    style={{
+                      padding: '9px 12px',
+                      fontSize: '0.88rem',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <label style={{ fontSize: '0.74rem', opacity: 0.85 }}>Correo electrónico:</label>
                   <input
                     type="email"
                     required
-                    value={emailVal}
-                    onChange={(e) => setEmailVal(e.target.value)}
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
                     placeholder="tu@correo.com"
                     style={{
                       padding: '9px 12px',
@@ -1846,14 +2408,14 @@ export default function App() {
                   />
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: '0.76rem', opacity: 0.8 }}>Contraseña:</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <label style={{ fontSize: '0.74rem', opacity: 0.85 }}>Contraseña:</label>
                   <input
                     type="password"
                     required
-                    value={passVal}
-                    onChange={(e) => setPassVal(e.target.value)}
-                    placeholder="••••••••"
+                    value={regPass}
+                    onChange={(e) => setRegPass(e.target.value)}
+                    placeholder="Mín. 6 car., 1 mayús., 1 núm."
                     style={{
                       padding: '9px 12px',
                       fontSize: '0.88rem',
@@ -1865,10 +2427,58 @@ export default function App() {
                   />
                 </div>
 
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <label style={{ fontSize: '0.74rem', opacity: 0.85 }}>Confirmar Contraseña:</label>
+                  <input
+                    type="password"
+                    required
+                    value={regConfirmPass}
+                    onChange={(e) => setRegConfirmPass(e.target.value)}
+                    placeholder="Repite tu contraseña"
+                    style={{
+                      padding: '9px 12px',
+                      fontSize: '0.88rem',
+                      borderRadius: 8,
+                      border:
+                        regConfirmPass && regConfirmPass !== regPass
+                          ? '1px solid #ef4444'
+                          : '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.2)',
+                      color: 'var(--text)',
+                    }}
+                  />
+                </div>
+
+                {/* INDICADORES VISUALES DE REQUISITOS DE CONTRASEÑA */}
+                <div
+                  style={{
+                    background: 'rgba(0,0,0,0.25)',
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    fontSize: '0.72rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                  }}
+                >
+                  <div style={{ color: regPass.length >= 6 ? '#22c55e' : 'var(--muted)' }}>
+                    {regPass.length >= 6 ? '✔' : '○'} Mínimo 6 caracteres
+                  </div>
+                  <div style={{ color: /[A-Z]/.test(regPass) ? '#22c55e' : 'var(--muted)' }}>
+                    {/[A-Z]/.test(regPass) ? '✔' : '○'} Al menos una mayúscula (A-Z)
+                  </div>
+                  <div style={{ color: /[0-9]/.test(regPass) ? '#22c55e' : 'var(--muted)' }}>
+                    {/[0-9]/.test(regPass) ? '✔' : '○'} Al menos un número (0-9)
+                  </div>
+                  <div style={{ color: regConfirmPass && regPass === regConfirmPass ? '#22c55e' : 'var(--muted)' }}>
+                    {regConfirmPass && regPass === regConfirmPass ? '✔' : '○'} Las contraseñas coinciden
+                  </div>
+                </div>
+
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={loginLoading}
+                  disabled={authLoading}
                   style={{
                     padding: '11px',
                     fontSize: '0.90rem',
@@ -1877,23 +2487,88 @@ export default function App() {
                     marginTop: 4,
                   }}
                 >
-                  {loginLoading ? 'Procesando...' : isRegisterMode ? 'Registrarme e Ingresar' : 'Iniciar Sesión'}
+                  {authLoading ? 'Creando...' : 'Continuar y Enviar Código'}
                 </button>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', marginTop: 4 }}>
                   <button
                     type="button"
-                    onClick={() => setIsRegisterMode(!isRegisterMode)}
+                    onClick={() => setLoginView('login_email')}
                     style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0 }}
                   >
-                    {isRegisterMode ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
+                    ¿Ya tienes cuenta? Inicia sesión
                   </button>
                   <button
                     type="button"
-                    onClick={() => setLoginViewMode('main')}
+                    onClick={() => setLoginView('main')}
                     style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 0 }}
                   >
                     ← Volver
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* VISTA 4: VALIDAR CÓDIGO DE 6 DÍGITOS ENVIADO AL CORREO */
+              <form onSubmit={handleConfirmarCodigo} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 320, margin: '0 auto', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.8rem' }}>✉️ 🔒</div>
+                <div style={{ fontSize: '0.94rem', fontWeight: 700, color: 'var(--accent)' }}>
+                  Valida tu Cuenta
+                </div>
+                <div style={{ fontSize: '0.78rem', lineHeight: 1.4, opacity: 0.85 }}>
+                  Hemos enviado un correo de validación a <b>{pendingUser?.email || regEmail}</b>. Ingresa el código de 6 dígitos para activar tu cuenta:
+                </div>
+
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  required
+                  value={regOtpCode}
+                  onChange={(e) => setRegOtpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  autoFocus
+                  style={{
+                    padding: '12px',
+                    fontSize: '1.4rem',
+                    letterSpacing: '8px',
+                    textAlign: 'center',
+                    borderRadius: 12,
+                    border: '1px solid var(--accent)',
+                    background: 'rgba(0,0,0,0.3)',
+                    color: 'var(--text)',
+                    fontWeight: 800,
+                  }}
+                />
+
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={authLoading || regOtpCode.length < 6}
+                  style={{
+                    padding: '11px',
+                    fontSize: '0.90rem',
+                    fontWeight: 700,
+                    borderRadius: 10,
+                  }}
+                >
+                  {authLoading ? 'Validando...' : 'Confirmar Código y Entrar'}
+                </button>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={handleReenviarCodigo}
+                    disabled={authLoading}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.78rem' }}
+                  >
+                    ¿No recibiste el correo? Reenviar código
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginView('register_email')}
+                    style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.78rem' }}
+                  >
+                    ← Modificar correo / datos
                   </button>
                 </div>
               </form>

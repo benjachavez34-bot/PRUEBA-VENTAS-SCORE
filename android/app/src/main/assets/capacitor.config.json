@@ -4,7 +4,18 @@
 	"webDir": "dist",
 	"server": {
 		"url": "https://benjachavez34-bot.github.io/PRUEBA-VENTAS-SCORE/",
-		"cleartext": true
+		"cleartext": true,
+		"allowNavigation": [
+			"firebaseapp.com",
+			"*.firebaseapp.com",
+			"web.app",
+			"*.web.app",
+			"google.com",
+			"*.google.com",
+			"accounts.google.com",
+			"googleapis.com",
+			"*.googleapis.com"
+		]
 	},
 	"android": {
 		"allowMixedContent": true,
