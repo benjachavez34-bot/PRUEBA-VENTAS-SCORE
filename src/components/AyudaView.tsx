@@ -1,11 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import scoreGorillaLogo from '../assets/images/score_gorilla_bg_1791923074721.jpg';
 
+interface AccionSugerida {
+  label: string;
+  tab: string;
+  icon?: string;
+}
+
 interface MensajeIA {
   id: string;
   remitente: 'usuario' | 'ia';
   texto: string;
   ts: number;
+  accion?: AccionSugerida;
 }
 
 interface AyudaViewProps {
@@ -16,170 +23,342 @@ interface AyudaViewProps {
 
 // Preguntas sugeridas para interacción rápida en 1 toque
 const PREGUNTAS_RAPIDAS = [
-  '¿Cómo registro una venta fiada?',
-  '¿Cómo liquidar o registrar un abono a un deudor?',
-  '¿Cómo funciona el stock y costo unitario?',
-  '¿Cómo hacer un cierre de caja?',
-  '¿Cómo exportar los datos a Excel?',
-  '¿Qué permisos tienen los vendedores y administradores?',
+  '🛒 ¿Cómo usar el carrito POS y código de barras?',
+  '🔒 ¿Cómo funciona el cierre de caja ciego y arqueo?',
+  '🗑️ ¿Cómo registrar mermas o productos dañados?',
+  '📲 ¿Cómo cobrar deudas por WhatsApp?',
+  '📈 ¿Cómo ver horas punta y rentabilidad de stock?',
+  '💳 ¿Cómo cobrar con débito o transferencia?',
+  '🔑 ¿Cómo cambiar mi PIN de ingreso rápido?',
+  '📊 ¿Cómo exportar reportes a Excel o WhatsApp?',
 ];
 
-// Motor de Conocimiento Especializado de Ventas Score
-function responderDudaApp(pregunta: string, isAdmin: boolean): string {
+interface RespuestaIA {
+  texto: string;
+  accion?: AccionSugerida;
+}
+
+// Motor de Conocimiento Especializado de Ventas Score (Actualizado Fases 1 a 5)
+function responderDudaApp(pregunta: string, isAdmin: boolean): RespuestaIA {
   const q = pregunta.toLowerCase().trim();
 
-  // Filtro de ámbito: Si no tiene que ver con la app o el negocio, restringir educadamente
-  const palabrasClaveApp = [
-    'venta', 'ventas', 'fiad', 'fiado', 'fiada', 'deud', 'deuda', 'deudor', 'deudores',
-    'stock', 'producto', 'productos', 'precio', 'costo', 'entrada', 'mercader', 'inventario',
-    'cierre', 'caja', 'ganancia', 'resumen', 'en cuenta', 'estadistica', 'estadísticas',
-    'excel', 'exportar', 'miembro', 'miembros', 'chat', 'indicacion', 'indicación',
-    'admin', 'administrador', 'vendedor', 'cuenta', 'perfil', 'avatar', 'telefono', 'teléfono',
-    'score', 'gorilla', 'hola', 'ayuda', 'cómo', 'como', 'qué', 'que', 'quien', 'quién',
-    'permiso', 'supervis', 'abono', 'pago', 'pagar', 'cobrar', 'ticket', 'invitado', 'app',
-    'aplicacion', 'aplicación', 'tutorial', 'manual', 'funciona', 'usar'
-  ];
-
-  const esRelevante = palabrasClaveApp.some((kw) => q.includes(kw));
-
-  if (!esRelevante) {
-    return (
-      '⚠️ **Ámbito restringido**:\n\n' +
-      'Soy el asistente virtual especializado de **Ventas Score** 🦍.\n\n' +
-      'Solo puedo responder consultas sobre el uso y las funciones de esta aplicación (gestión de ventas, control de deudores, stock, cierres de caja, reportes y permisos).\n\n' +
-      '¿En qué duda de la app te puedo orientar hoy?'
-    );
+  // 1. Saludos
+  if (
+    q.includes('hola') ||
+    q.includes('buenos dias') ||
+    q.includes('buenas tardes') ||
+    q.includes('buenas noches') ||
+    q.includes('hey')
+  ) {
+    return {
+      texto:
+        '¡Hola! 👋 Soy **ScoreBot**, el asistente de inteligencia artificial de **Ventas Score** 🦍.\n\n' +
+        'He sido actualizado con todo el conocimiento de las nuevas herramientas de la plataforma:\n\n' +
+        '• 🛒 **Punto de Venta (POS)**: Carrito multiproducto, código de barras y vuelto.\n' +
+        '• 📲 **Cobranza WhatsApp**: Notificaciones automáticas con datos de transferencia y tickets.\n' +
+        '• 📦 **Stock & Mermas**: Categorías, stock mínimo y bajas contables.\n' +
+        '• 🔒 **Cierre de Caja Ciego**: Arqueo real vs esperado y auditoría de descuadre.\n' +
+        '• 📊 **Business Intelligence**: Horas punta 24h, rentabilidad de productos y auditoría.\n\n' +
+        '¿Sobre qué función te gustaría aprender hoy?',
+    };
   }
 
-  // Respuestas específicas según intención:
-
-  // 1. Saludo
-  if (q.includes('hola') || q.includes('buenos dias') || q.includes('buenas tardes')) {
-    return (
-      '¡Hola! 👋 Soy el asistente oficial de **Ventas Score**.\n\n' +
-      'Estoy aquí para resolver cualquier duda que tengas sobre cómo registrar ventas, controlar inventario, gestionar deudas o entender tus números.\n\n' +
-      '💡 Puedes seleccionar una de las preguntas frecuentes arriba o escribir directamente lo que necesitas saber.'
-    );
+  // 2. POS, Carrito Multiproducto, Código de Barras y Calculadora de Vuelto
+  if (
+    q.includes('carrito') ||
+    q.includes('pos') ||
+    q.includes('codigo de barra') ||
+    q.includes('código de barra') ||
+    q.includes('lector') ||
+    q.includes('escan') ||
+    q.includes('escaner') ||
+    q.includes('escáner') ||
+    q.includes('vuelto') ||
+    q.includes('cambio') ||
+    (q.includes('venta') && (q.includes('multiproducto') || q.includes('varios')))
+  ) {
+    return {
+      texto:
+        '🛒 **Punto de Venta (POS) con Carrito & Escáner**:\n\n' +
+        '1. **Armar Carrito**: En la pestaña **Ventas**, selecciona cualquier producto del catálogo o usa la barra de búsqueda y toca **"Agregar al Carrito"**. Puedes sumar múltiples productos diferentes en una sola transacción.\n' +
+        '2. **Lector de Código de Barras**: Pulsa el botón **📷 Escanear** para abrir la cámara de tu smartphone y apuntar al código de barras del producto. Al detectarlo, se sumará automáticamente al carrito.\n' +
+        '3. **Medios de Pago**: Elige entre Efectivo, Transferencia, Débito / Tarjetas POS o Fiado.\n' +
+        '4. **Calculadora de Vuelto**: Si el cliente paga en efectivo, el sistema te muestra botones rápidos de billetes chilenos ($20.000, $10.000, $5.000, etc.) o puedes ingresar el monto recibido. Te calculará el vuelto exacto al instante.\n' +
+        '5. **Ticket Digital**: Tras confirmar, puedes enviar el ticket detallado de la compra directamente al WhatsApp del cliente.',
+      accion: { label: 'Ir al Punto de Venta (POS)', tab: 'pos', icon: '🛒' },
+    };
   }
 
-  // 2. Ventas fiadas y al contado
-  if (q.includes('fiad') || (q.includes('venta') && (q.includes('cómo') || q.includes('como') || q.includes('registrar')))) {
-    return (
-      '🧾 **Cómo registrar una Venta**:\n\n' +
-      '1. Ve a la pestaña **Venta**.\n' +
-      '2. Selecciona el **Producto** en el menú desplegable. El sistema te mostrará automáticamente el stock actual disponible.\n' +
-      '3. Ingresa la **Cantidad**. El precio y total se calculan de inmediato (puedes ajustar el precio si hay una oferta especial).\n' +
-      '4. **Tipo de venta**:\n' +
-      '   - **Al contado**: Deja la casilla "Fiado" desmarcada y pulsa **Registrar Venta**.\n' +
-      '   - **Fiado / A crédito**: Marca la casilla **"Fiado"** y escribe el **nombre del cliente**. La venta se sumará automáticamente a la cuenta corriente del cliente en la pestaña **Deudores**.\n' +
-      '5. Al registrarse, el stock del producto se descuenta automáticamente para mantener el inventario al día.'
-    );
+  // 3. Medios de Pago (Efectivo, Transferencia, Débito, Fiado)
+  if (
+    q.includes('medio de pago') ||
+    q.includes('medios de pago') ||
+    q.includes('debito') ||
+    q.includes('débito') ||
+    q.includes('tarjeta') ||
+    q.includes('transferencia') ||
+    q.includes('pos')
+  ) {
+    return {
+      texto:
+        '💳 **Medios de Pago Disponibles**:\n\n' +
+        'Al registrar una venta puedes elegir cómo paga tu cliente:\n\n' +
+        '• 💵 **Efectivo**: Conteo en dinero físico. Activa la calculadora de vuelto con billetes chilenos.\n' +
+        '• 🏦 **Transferencia**: Para transferencias bancarias verificadas en la cuenta de la empresa.\n' +
+        '• 💳 **Débito / POS**: Para cobros con máquina de tarjetas (Transbank, Getnet, SumUp, etc.).\n' +
+        '• 🏷️ **Fiado (Crédito)**: Suma la deuda a la cuenta corriente del cliente en la pestaña Deudores.\n\n' +
+        '💡 Todos los medios de pago se separan y concilian automáticamente en el **Cierre de Caja** y en las **Estadísticas de Negocio**.',
+      accion: { label: 'Ir a Ventas', tab: 'pos', icon: '💳' },
+    };
   }
 
-  // 3. Deudores, pagos y abonos
-  if (q.includes('deud') || q.includes('abono') || q.includes('cobrar') || q.includes('pagar') || q.includes('pagó todo')) {
-    return (
-      '👥 **Gestión de Deudores y Cobranza**:\n\n' +
-      'En la pestaña **Deudores** verás la lista de todos los clientes con saldo pendiente:\n\n' +
-      '• **Abono Parcial**: Haz clic en el botón verde **"Abonar"** en la tarjeta del cliente, ingresa el monto pagado y confirma. El saldo adeudado se reducirá y el dinero ingresará a caja.\n' +
-      '• **Liquidación Total ("Pagó todo")**: Si el cliente cancela la totalidad de la deuda, pulsa **"Pagó todo"** para saldar la cuenta a $0.\n' +
-      '• **Agregar Deuda Extra**: Si el cliente pide fiado productos adicionales o una deuda manual, pulsa **"+ Deuda"**. Puedes elegir si descuenta stock o solo suma saldo adeudado.\n' +
-      '• **Historial**: Puedes tocar en **"Ver detalle"** de cada deudor para revisar cuándo y qué productos compró fiado.'
-    );
+  // 4. Mermas, Desperdicios y Bajas de Stock
+  if (
+    q.includes('merma') ||
+    q.includes('mermas') ||
+    q.includes('roto') ||
+    q.includes('rotos') ||
+    q.includes('vencid') ||
+    q.includes('dañad') ||
+    q.includes('degustacion') ||
+    q.includes('baja')
+  ) {
+    return {
+      texto:
+        '🗑️ **Registro de Mermas y Bajas de Stock**:\n\n' +
+        'Cuando un producto se rompe, vence o se utiliza para degustación/muestra:\n\n' +
+        '1. Ve a la pestaña **Stock**.\n' +
+        '2. En la tarjeta del producto, pulsa el botón **"🗑️ Merma"**.\n' +
+        '3. Ingresa la **Cantidad de unidades** y el **Motivo**: Vencimiento, Rotura/Daño, Degustación/Muestra u Otro.\n' +
+        '4. **Impacto Contable Inteligente**:\n' +
+        '   - Descuenta el stock físico de inmediato para mantener el inventario 100% exacto.\n' +
+        '   - **NO** altera el dinero de caja (no fue una venta ni un ingreso).\n' +
+        '   - Registra el costo de la pérdida en el resumen contable e historial de mermas.',
+      accion: { label: 'Ir a Control de Stock', tab: 'stock', icon: '📦' },
+    };
   }
 
-  // 4. Stock, inventario y costo
-  if (q.includes('stock') || q.includes('costo') || q.includes('inventario') || q.includes('entrada') || q.includes('producto')) {
-    return (
-      '📦 **Control de Stock y Entradas de Mercadería**:\n\n' +
-      '• **Crear Producto**: En la pestaña **Stock**, en la parte superior completa el nombre del producto, existencias iniciales, costo de compra y precio de venta recomendado.\n' +
-      '• **Entrada de Mercadería (Reposición)**: Cuando compres más unidades para reponer, pulsa el botón **"+ Entrada"** en el producto correspondiente. Ingresa las unidades recibidas y el costo total pagado. El sistema recalcula automáticamente el **costo unitario ponderado**.\n' +
-      '• **Venta Rápida**: Puedes vender 1 o más unidades directamente desde la tarjeta del producto con el botón de venta rápida.\n' +
-      '• **Margen y Utilidad**: Cada tarjeta de producto muestra cuánto ganas en dinero y porcentaje por cada unidad vendida.'
-    );
-  }
-
-  // 5. Cierres de caja y resumen
-  if (q.includes('cierre') || q.includes('resumen') || q.includes('en cuenta') || q.includes('caja')) {
+  // 5. Cierre de Caja Ciego, Arqueo y Descuadre
+  if (
+    q.includes('cierre ciego') ||
+    q.includes('arqueo') ||
+    q.includes('descuadre') ||
+    q.includes('cuadrada') ||
+    q.includes('sobrante') ||
+    q.includes('faltante') ||
+    (q.includes('cierre') && (q.includes('caja') || q.includes('turno')))
+  ) {
     if (!isAdmin) {
-      return (
-        '💰 **Cierres de Caja y Resumen Financiero**:\n\n' +
-        'Las pestañas de **Resumen**, **Cierres de Caja** y **Estadísticas avanzadas** están reservadas exclusivamente para los **Administradores** por motivos de seguridad y confidencialidad comercial.\n\n' +
-        'Como vendedor, tus ventas al contado y abonos cobrados se computan automáticamente en tiempo real en los números consolidados de la administración.'
-      );
+      return {
+        texto:
+          '🔒 **Cierre de Caja & Arqueo**:\n\n' +
+          'El cierre oficial de caja y la auditoría de turno están reservados para los **Administradores**.\n\n' +
+          'Como vendedor, el sistema computa tus ventas y cobros en tiempo real para que el supervisor realice el arqueo al final del turno.',
+      };
     }
-    return (
-      '💰 **Resumen y Cierre de Caja (Modo Administrador)**:\n\n' +
-      '• **Inversión**: Total de dinero destinado a compras de stock.\n' +
-      '• **Total Ingresado**: Dinero real cobrado (ventas al contado + abonos recibidos de deudores).\n' +
-      '• **En Cuenta**: Dinero neto disponible tras restar la inversión realizada (`Ingresado - Inversión`).\n' +
-      '• **Te Deben**: Saldo acumulado por cobrar a todos los clientes fiados.\n' +
-      '• **Ganancia Neta**: Utilidad real calculada sobre las unidades efectivamente comercializadas.\n\n' +
-      '🔒 **Cómo Cerrar Caja**: Pulsa el botón **"Cerrar Caja"** en el Resumen o Estadísticas, dale un nombre al período (ej. "Cierre Semana 1 - Octubre") y el sistema congelará y guardará el corte numerado en el historial para auditoría.'
-    );
+    return {
+      texto:
+        '🔒 **Cierre de Caja Ciego & Conciliación Multimedio**:\n\n' +
+        '1. Ve a **Resumen** y pulsa **"🔒 Cerrar caja"**.\n' +
+        '2. **Modo Guiado vs Conteo Ciego**: Puedes activar el "Modo Conteo Ciego" para ingresar el dinero físico sin ver las expectativas del sistema, evitando sesgos en el cajero.\n' +
+        '3. **Arqueo por Medio de Pago**:\n' +
+        '   - **Efectivo contado**: Con calculadora rápida de billetes ($20k, $10k, $5k, etc.).\n' +
+        '   - **Transferencias**: Total verificado en cuenta bancaria.\n' +
+        '   - **Tarjetas Débito**: Total de vouchers de la máquina POS.\n' +
+        '4. **Auditoría de Descuadre en Vivo**:\n' +
+        '   - 🟢 **Caja Cuadrada ($0)**: Coincidencia perfecta.\n' +
+        '   - 🟡 **Sobrante (+)**: Dinero excedente en caja.\n' +
+        '   - 🔴 **Faltante (-)**: Alerta destacada para justificación.\n' +
+        '5. **Reporte WhatsApp**: Al confirmar, puedes enviar el comprobante oficial formateado directamente al dueño o supervisor.',
+      accion: { label: 'Ir a Resumen y Cierre', tab: 'resumen', icon: '🔒' },
+    };
   }
 
-  // 6. Exportación a Excel
-  if (q.includes('excel') || q.includes('exportar') || q.includes('descargar') || q.includes('reporte')) {
-    return (
-      '📊 **Exportación de Datos a Excel (`.xlsx`)**:\n\n' +
-      'Puedes descargar un informe financiero completo en cualquier momento:\n\n' +
-      '1. Ve a la pestaña **Resumen** o **Estadísticas** (o desde el botón de exportación rápida).\n' +
-      '2. Haz clic en el botón verde **"Exportar a Excel"**.\n' +
-      '3. El sistema generará y descargará automáticamente un archivo con **5 hojas ordenadas**:\n' +
-      '   - 👥 **Deudores**: Lista de saldos por cobrar y total pendiente.\n' +
-      '   - 📦 **Stock**: Existencias actuales, precios y valoración de inventario.\n' +
-      '   - 🧾 **Ventas**: Detalle cronológico de cada venta, vendedor responsable y método de pago.\n' +
-      '   - 💰 **Resumen**: Totales de inversión, ingresos, cuenta y utilidad.\n' +
-      '   - 📑 **Cierres**: Historial de cortes de caja oficiales archivados.'
-    );
+  // 6. Deudores, Cobranza WhatsApp y Datos Bancarios
+  if (
+    q.includes('deud') ||
+    q.includes('cobranza') ||
+    q.includes('abono') ||
+    q.includes('cuenta rut') ||
+    q.includes('bancoestado') ||
+    q.includes('datos bancarios') ||
+    q.includes('moros') ||
+    q.includes('limite de credito')
+  ) {
+    return {
+      texto:
+        '👥 **Cobranza WhatsApp & Gestión de Deudores**:\n\n' +
+        '• **Cobro en 1 Toque por WhatsApp**: Toca el botón de WhatsApp en la tarjeta del deudor. El sistema redactará un mensaje con el saldo adeudado y los **datos de transferencia bancaria de Benjamín Chávez** (BancoEstado, Cuenta RUT 20.627.873-0).\n' +
+        '• **Comprobante de Abono**: Al registrar un abono parcial o liquidación total, puedes enviarle un comprobante digital inmediato con su saldo anterior y saldo restante.\n' +
+        '• **Semáforo de Morosidad**:\n' +
+        '   - 🟢 **Al día** (deuda reciente < 15 días).\n' +
+        '   - 🟡 **Moroso** (entre 15 y 30 días de antigüedad).\n' +
+        '   - 🔴 **Crítico** (más de 30 días sin registrar abonos).\n' +
+        '• **Límite de Crédito**: Puedes fijar un monto máximo de fiado por cliente para proteger el capital.',
+      accion: { label: 'Ir a Deudores', tab: 'deudores', icon: '👥' },
+    };
   }
 
-  // 7. Permisos y Roles (Admin vs Vendedor)
-  if (q.includes('permiso') || q.includes('admin') || q.includes('rol') || q.includes('supervis') || q.includes('quién') || q.includes('quien')) {
-    return (
-      '👑 **Roles y Permisos en Ventas Score**:\n\n' +
-      '• **Administradores Autorizados**: **Benjamín Chávez** (`benja.chavez34@gmail.com`) y **Francisco Inzunza** (`fco.inzunza.re@gmail.com`).\n' +
-      '  - Acceso total a: Ventas, Deudores, Stock, Resumen financiero, Estadísticas de rendimiento, Miembros de la empresa, Chat corporativo con emisión de indicaciones oficiales y Panel de Supervisión.\n\n' +
-      '• **Vendedores (Equipo Comercial)**:\n' +
-      '  - Acceso enfocado a: Registro de Ventas en ruta, consulta y cobranza de Deudores, catálogo de Stock disponible, configuración de su propio perfil en "Mi Cuenta" y esta sección de Ayuda IA.'
-    );
+  // 7. Horas Punta, Rentabilidad y Business Intelligence
+  if (
+    q.includes('hora punta') ||
+    q.includes('horas punta') ||
+    q.includes('rentabilidad') ||
+    q.includes('estrella') ||
+    q.includes('estancad') ||
+    q.includes('agotamiento') ||
+    q.includes('dias de stock') ||
+    q.includes('inteligencia') ||
+    q.includes('bi')
+  ) {
+    if (!isAdmin) {
+      return {
+        texto:
+          '📈 **Business Intelligence & Métricas**:\n\n' +
+          'El panel de analítica avanzada, horas punta y matrices de rentabilidad está reservado para los **Administradores**.',
+      };
+    }
+    return {
+      texto:
+        '📈 **Business Intelligence & Analítica de Negocio**:\n\n' +
+        'En la pestaña **Estadísticas** encontrarás herramientas de alta dirección:\n\n' +
+        '• ⏰ **Horas Punta (24h)**: Gráfico de ventas por hora del día con detección de la **Hora Pico** de mayor facturación para optimizar turnos y promociones.\n' +
+        '• 💳 **Cuota por Medio de Pago**: Participación porcentual de Efectivo, Transferencia, Débito y Fiado.\n' +
+        '• 📊 **Matriz de Rentabilidad & Días de Stock**:\n' +
+        '   - 🌟 **Producto Estrella**: Alto margen y alta rotación.\n' +
+        '   - 💎 **Rentable**: Margen superior al 35%.\n' +
+        '   - 🚨 **Alerta Crítica**: Productos con stock para **<= 3 días** según su ritmo de venta.\n' +
+        '   - 🧊 **Estancado**: Productos en bodega sin ventas en el período.\n' +
+        '• 🛡️ **Registro de Auditoría**: Trazabilidad completa por tipo de operación y vendedor.\n' +
+        '• 📲 **Reporte Ejecutivo WhatsApp**: Envía un resumen gerencial en 1 clic.',
+      accion: { label: 'Ir a Estadísticas BI', tab: 'estadisticas', icon: '📈' },
+    };
   }
 
-  // 8. Miembros y Chat corporativo
-  if (q.includes('chat') || q.includes('miembro') || q.includes('indicacion') || q.includes('indicación') || q.includes('mensaje')) {
-    return (
-      '💬 **Directorio de Miembros y Chat**:\n\n' +
-      '• **Directorio**: Muestra a los miembros del equipo con su cargo, sucursal, foto y botón de enlace directo a WhatsApp.\n' +
-      '• **Canal de Chat**: Los administradores pueden emitir mensajes con categoría **"📢 Indicación Oficial"** o **"⚠️ Urgente"**, permitiendo coordinar rutas y metas en tiempo real con el equipo.\n' +
-      '*(Nota: El acceso a este panel está reservado para la supervisión y administración corporativa).*'
-    );
+  // 8. Stock Mínimo, Categorías y Reposición
+  if (
+    q.includes('stock minimo') ||
+    q.includes('stock mínimo') ||
+    q.includes('categoria') ||
+    q.includes('categoría') ||
+    q.includes('alerta') ||
+    q.includes('reposicion') ||
+    q.includes('reposición')
+  ) {
+    return {
+      texto:
+        '📦 **Stock Mínimo & Categorías de Productos**:\n\n' +
+        '• **Filtros por Categoría**: Tanto en **Stock** como en el **Punto de Venta** puedes filtrar por Energéticas, Bebidas, Snacks, etc., para ubicar productos velozmente.\n' +
+        '• **Stock Mínimo Personalizado**: Al crear o editar un producto puedes definir su umbral crítico (ej: 5 unidades).\n' +
+        '• **Banner de Alerta Urgente**: Si algún producto cae por debajo de su stock mínimo, aparecerá un banner rojo arriba de la pantalla avisando exactamente qué producto necesita reposición urgente.',
+      accion: { label: 'Ir a Stock', tab: 'stock', icon: '📦' },
+    };
   }
 
-  // 9. Perfil y Mi Cuenta
-  if (q.includes('cuenta') || q.includes('perfil') || q.includes('avatar') || q.includes('foto') || q.includes('telefono')) {
-    return (
-      '👤 **Configuración de "Mi Cuenta"**:\n\n' +
-      'Todos los usuarios pueden personalizar su información:\n' +
-      '1. Pulsa en el botón **"👤 Mi Cuenta"** en la barra superior (o toca tu foto de perfil).\n' +
-      '2. Puedes editar tu **Nombre y Apellidos**, **Teléfono de WhatsApp**, **Sucursal / Zona** y **Cargo**.\n' +
-      '3. Elige tu **Avatar Corporativo**: Score Gorilla 🦍, Director 👔, Ejecutivo 💼 o Vendedor 🚀.\n' +
-      '4. Pulsa **"Guardar cambios"** para que tus compañeros vean tu ficha actualizada en el directorio.'
-    );
+  // 9. PIN de Acceso Rápido y Perfil
+  if (
+    q.includes('pin') ||
+    q.includes('ingreso rapido') ||
+    q.includes('ingreso rápido') ||
+    q.includes('perfil') ||
+    q.includes('avatar') ||
+    q.includes('contraseña')
+  ) {
+    return {
+      texto:
+        '🔑 **PIN de Ingreso Rápido & Perfil**:\n\n' +
+        '• **Cambiar tu PIN**: Ve a **Configuración** o pulsa en **"Mi Perfil"**. Encontrarás el campo para definir un PIN de 4 dígitos. Con este PIN puedes entrar a la app en 1 segundo sin necesidad de escribir tu correo o contraseña cada vez.\n' +
+        '• **Datos de Contacto**: Puedes actualizar tu nombre, teléfono de WhatsApp y sucursal asignada.\n' +
+        '• **Avatar Corporativo**: Elige tu insignia entre el Gorilla Score 🦍, Director 👔, Ejecutivo 💼 o Vendedor 🚀.',
+      accion: { label: 'Ir a Configuración', tab: 'configuracion', icon: '⚙️' },
+    };
+  }
+
+  // 10. Supervisión y Evaluación de Vendedores
+  if (
+    q.includes('supervis') ||
+    q.includes('evalua') ||
+    q.includes('estrellas') ||
+    q.includes('puntuacion') ||
+    q.includes('puntuación') ||
+    q.includes('vendedor')
+  ) {
+    if (!isAdmin) {
+      return {
+        texto:
+          '⭐ **Evaluación y Desempeño Comercial**:\n\n' +
+          'El panel de supervisión y evaluación de vendedores permite al supervisor medir la efectividad en ventas, cobranza y atención al cliente.',
+      };
+    }
+    return {
+      texto:
+        '⭐ **Supervisión & Evaluación de Vendedores**:\n\n' +
+        'En la pestaña **Supervisión** (solo administradores):\n\n' +
+        '• **Métricas por Vendedor**: Ventas totales, unidades comercializadas, ticket promedio y efectividad de cobranza de fiados.\n' +
+        '• **Evaluación Profesional de 4 Criterios** (1 a 5 estrellas):\n' +
+        '   1. Cumplimiento de Metas.\n' +
+        '   2. Cobranza de Fiados.\n' +
+        '   3. Servicio al Cliente.\n' +
+        '   4. Cuadratura de Stock y Arqueo.\n' +
+        '• **Puntaje Ponderado**: Calcula automáticamente la calificación general oficial del vendedor con notas del supervisor.',
+      accion: { label: 'Ir a Supervisión', tab: 'vendedores', icon: '⭐' },
+    };
+  }
+
+  // 11. Exportación a Excel y Reportes
+  if (
+    q.includes('excel') ||
+    q.includes('exportar') ||
+    q.includes('descargar') ||
+    q.includes('informe') ||
+    q.includes('reporte')
+  ) {
+    return {
+      texto:
+        '📊 **Exportación de Datos a Excel & Reportes WhatsApp**:\n\n' +
+        '• **Libro Excel Completo (.xlsx)**: En Estadísticas o Resumen pulsa **"📊 Exportar Excel"**. Genera un archivo con 5 hojas ordenadas:\n' +
+        '   - 👥 **Deudores**: Saldos pendientes y teléfonos.\n' +
+        '   - 📦 **Stock**: Existencias y valoración.\n' +
+        '   - 🧾 **Ventas**: Desglose con medio de pago y vendedor.\n' +
+        '   - 💰 **Resumen**: Balance financiero general.\n' +
+        '   - 📑 **Cierres**: Historial de arqueos con estado de cuadratura.\n\n' +
+        '• **Reporte WhatsApp Ejecutivo**: En Estadísticas pulsa **"📲 Reporte WhatsApp"** para enviar el resumen del negocio directo a tu celular.',
+      accion: { label: 'Ir a Estadísticas', tab: 'estadisticas', icon: '📊' },
+    };
+  }
+
+  // 12. Permisos y Roles
+  if (
+    q.includes('permiso') ||
+    q.includes('admin') ||
+    q.includes('administrador') ||
+    q.includes('rol') ||
+    q.includes('quién') ||
+    q.includes('quien')
+  ) {
+    return {
+      texto:
+        '👑 **Roles y Permisos en Ventas Score**:\n\n' +
+        '• **Administradores Autorizados**: **Benjamín Chávez** (`benja.chavez34@gmail.com`) y **Francisco Inzunza** (`fco.inzunza.re@gmail.com`).\n' +
+        '  - Acceso total a: Ventas POS, Deudores, Control de Stock, Resumen financiero, Estadísticas BI, Cierres de caja, Miembros, Chat oficial y Panel de Supervisión.\n\n' +
+        '• **Vendedores (Equipo Comercial)**:\n' +
+        '  - Acceso enfocado a: Registro de Ventas en ruta, consulta y cobranza de Deudores con comprobantes, catálogo de Stock disponible y configuración de perfil.',
+    };
   }
 
   // Respuesta por defecto con orientación general
-  return (
-    '💡 **Asistencia de Ventas Score**:\n\n' +
-    'Puedo guiarte detalladamente sobre cualquiera de estos temas:\n' +
-    '• **Ventas**: Cómo vender al contado o a crédito (fiado).\n' +
-    '• **Deudores**: Cómo registrar abonos parciales o liquidar una cuenta.\n' +
-    '• **Stock**: Cómo agregar productos y registrar entradas de mercadería.\n' +
-    '• **Cierres y Resumen**: Cómo interpretar los saldos e ingresos.\n' +
-    '• **Exportación**: Cómo descargar el reporte de Excel.\n' +
-    '• **Roles**: Diferencias entre cuenta Administrador y Vendedor.\n\n' +
-    'Escribe tu pregunta con tus propias palabras o pulsa una de las sugerencias rápidas arriba.'
-  );
+  return {
+    texto:
+      '💡 **Guía Rápida de Ventas Score**:\n\n' +
+      'Puedo orientarte paso a paso sobre cualquiera de estas áreas:\n\n' +
+      '• 🛒 **Punto de Venta**: Carrito multiproducto, código de barras y vuelto en efectivo.\n' +
+      '• 📲 **Cobranza**: Notificaciones por WhatsApp con cuenta bancaria y comprobantes.\n' +
+      '• 📦 **Inventario**: Stock mínimo, categorías y registro de mermas/roturas.\n' +
+      '• 🔒 **Caja**: Cierre ciego, arqueo por medio de pago y detección de descuadre.\n' +
+      '• 📈 **Estadísticas**: Horas punta 24h, rentabilidad de productos y reporte ejecutivo.\n' +
+      '• 🔑 **Seguridad**: Configuración de PIN de ingreso rápido y perfiles.\n\n' +
+      '¿Sobre cuál de estos temas deseas consultar?',
+  };
 }
 
 export const AyudaView: React.FC<AyudaViewProps> = ({
@@ -191,7 +370,7 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
     {
       id: 'bienvenida',
       remitente: 'ia',
-      texto: `¡Hola ${userName}! 👋 Soy el Asistente Virtual de **Ventas Score** 🦍.\n\nEstoy aquí para responder cualquier duda sobre el funcionamiento de la aplicación: registro de ventas, deudores, control de stock, cierres de caja y reportes.\n\n¿En qué te puedo ayudar hoy?`,
+      texto: `¡Hola ${userName}! 👋 Soy **ScoreBot**, el Asistente Virtual Especializado de **Ventas Score** 🦍.\n\nHe sido actualizado con todas las funciones nuevas de la app: Carrito POS con código de barras, cobranza WhatsApp con datos bancarios, registro de mermas, cierre de caja ciego y el panel de Business Intelligence.\n\n¿En qué te puedo orientar hoy?`,
       ts: Date.now(),
     },
   ]);
@@ -218,18 +397,30 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
     if (!textoAEnviar) setInputTexto('');
     setEscribiendo(true);
 
-    // Simulación de respuesta inteligente con micro-delay para naturalidad
+    // Simulación de respuesta inteligente instantánea pero natural
     setTimeout(() => {
-      const respuesta = responderDudaApp(texto, isAdmin);
+      const resp = responderDudaApp(texto, isAdmin);
       const nuevoMsgIA: MensajeIA = {
         id: 'ia-' + Date.now(),
         remitente: 'ia',
-        texto: respuesta,
+        texto: resp.texto,
+        accion: resp.accion,
         ts: Date.now(),
       };
       setMensajes((prev) => [...prev, nuevoMsgIA]);
       setEscribiendo(false);
-    }, 450);
+    }, 380);
+  };
+
+  const handleLimpiarChat = () => {
+    setMensajes([
+      {
+        id: 'bienvenida-' + Date.now(),
+        remitente: 'ia',
+        texto: `Chat reiniciado. ¿En qué duda operativa de **Ventas Score** te puedo ayudar, ${userName}?`,
+        ts: Date.now(),
+      },
+    ]);
   };
 
   return (
@@ -240,48 +431,63 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
         style={{
           padding: '12px 14px',
           margin: 0,
-          background: 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.06) 100%)',
+          background: 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.08) 100%)',
           borderLeft: '4px solid var(--accent)',
           display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           gap: 12,
         }}
       >
-        <img
-          src={scoreGorillaLogo}
-          alt="Score AI"
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            objectFit: 'cover',
-            border: '2px solid var(--accent)',
-            boxShadow: '0 0 10px rgba(37,99,235,0.35)',
-            flexShrink: 0,
-          }}
-          referrerPolicy="no-referrer"
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>ScoreBot — Asistente IA</span>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                fontWeight: 800,
-                background: 'var(--accent)',
-                color: '#fff',
-                padding: '1px 6px',
-                borderRadius: 4,
-                textTransform: 'uppercase',
-              }}
-            >
-              Exclusivo de la App
-            </span>
-          </div>
-          <div className="sub" style={{ fontSize: '0.78rem', marginTop: 2 }}>
-            Responde dudas operativas sobre ventas, deudores, stock, números y cierres de caja.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+          <img
+            src={scoreGorillaLogo}
+            alt="Score AI"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '2px solid var(--accent)',
+              boxShadow: '0 0 10px rgba(37,99,235,0.35)',
+              flexShrink: 0,
+            }}
+            referrerPolicy="no-referrer"
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>ScoreBot — Asistente IA</span>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 800,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  textTransform: 'uppercase',
+                }}
+              >
+                Actualizado 2026
+              </span>
+            </div>
+            <div className="sub" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+              Experto en POS, cobranza WhatsApp, mermas, cierre ciego y métricas BI.
+            </div>
           </div>
         </div>
+
+        {mensajes.length > 2 && (
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ fontSize: '0.75rem', padding: '4px 8px', flexShrink: 0 }}
+            onClick={handleLimpiarChat}
+            title="Reiniciar conversación"
+          >
+            Limpiar ↺
+          </button>
+        )}
       </div>
 
       {/* CHIPS DE PREGUNTAS RÁPIDAS (DESLIZABLES EN SMARTPHONES) */}
@@ -301,38 +507,37 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
             type="button"
             className="btn-ghost"
             style={{
-              padding: '6px 12px',
               fontSize: '0.78rem',
-              fontWeight: 600,
-              borderRadius: 20,
-              border: '1px solid var(--border)',
+              padding: '6px 10px',
+              borderRadius: 16,
               background: 'var(--card)',
+              border: '1px solid var(--border)',
               flexShrink: 0,
+              cursor: 'pointer',
             }}
             onClick={() => handleEnviar(pregunta)}
           >
-            💬 {pregunta}
+            {pregunta}
           </button>
         ))}
       </div>
 
-      {/* VENTANA DE CONVERSACIÓN */}
+      {/* HISTORIAL DEL CHAT */}
       <div
         className="card"
         style={{
-          padding: '12px',
-          minHeight: 340,
-          maxHeight: '58vh',
+          padding: 14,
+          margin: 0,
+          minHeight: 380,
+          maxHeight: 520,
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
-          margin: 0,
         }}
       >
         {mensajes.map((m) => {
           const esMio = m.remitente === 'usuario';
-
           return (
             <div
               key={m.id}
@@ -346,7 +551,7 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
               {!esMio && (
                 <img
                   src={scoreGorillaLogo}
-                  alt="IA"
+                  alt="ScoreBot"
                   style={{
                     width: 28,
                     height: 28,
@@ -391,6 +596,29 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
                   </div>
                 )}
                 <div>{m.texto}</div>
+
+                {/* Botón de acción interactiva integrada si existe */}
+                {m.accion && onNavigateTab && (
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => onNavigateTab(m.accion!.tab)}
+                    >
+                      <span>{m.accion.icon || '👉'}</span>
+                      <span>{m.accion.label}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -427,7 +655,7 @@ export const AyudaView: React.FC<AyudaViewProps> = ({
       >
         <input
           type="text"
-          placeholder="Escribe tu consulta sobre la app (ej: cómo fiar, cierres, stock)..."
+          placeholder="Escribe tu consulta sobre la app (ej: POS, mermas, arqueo, horas punta)..."
           value={inputTexto}
           onChange={(e) => setInputTexto(e.target.value)}
           style={{ flex: 1, fontSize: '0.9rem' }}
