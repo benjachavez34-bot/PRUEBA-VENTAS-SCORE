@@ -150,6 +150,38 @@ export interface TopProductoItem {
   total: number;
 }
 
+export interface DistribucionHorariaItem {
+  hora: number; // 0 a 23
+  horaLabel: string; // "08:00", "15:00"
+  total: number;
+  transacciones: number;
+  unidades: number;
+}
+
+export interface DesgloseMediosPagoItem {
+  medio: string; // 'efectivo' | 'transferencia' | 'debito' | 'fiado'
+  label: string;
+  total: number;
+  porcentaje: number;
+  transacciones: number;
+}
+
+export interface ProductoRentabilidadItem {
+  productoId: string;
+  nombre: string;
+  precioVenta: number;
+  costoUnit: number;
+  margenUnit: number;
+  margenPct: number;
+  unidadesVendidas: number;
+  ventasTotal: number;
+  gananciaTotal: number;
+  stockActual: number;
+  diasInventarioRestante: number | null;
+  clasificacion: 'estrella' | 'rentable' | 'volumen' | 'estancado' | 'estandar';
+  alertaAgotamiento: boolean;
+}
+
 export interface EstadisticasPeriodo {
   desde: number;
   hasta: number;
@@ -163,6 +195,13 @@ export interface EstadisticasPeriodo {
   ticketPromedio: number;
   ventasPorDia: VentaPorDiaItem[];
   topProductos: TopProductoItem[];
+  // Fase 5: Business Intelligence
+  distribucionHoraria?: DistribucionHorariaItem[];
+  horaPico?: { hora: number; horaLabel: string; total: number; transacciones: number } | null;
+  desgloseMedios?: DesgloseMediosPagoItem[];
+  rentabilidadProductos?: ProductoRentabilidadItem[];
+  totalFiadoPeriodo?: number;
+  totalMermasPeriodo?: number;
 }
 
 export interface Miembro {

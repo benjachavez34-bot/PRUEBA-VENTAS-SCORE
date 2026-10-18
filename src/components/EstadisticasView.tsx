@@ -11,6 +11,7 @@ import {
   getPeriodRange,
   getEquivalentPreviousRange,
   calcEstadisticas,
+  generarReporteEjecutivoWhatsApp,
 } from '../utils/formatters';
 import { exportExcel } from '../utils/excel';
 
@@ -26,7 +27,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
   movs,
   productos,
   cierres,
-  onCerrarCaja,
   onVerDetalleCierre,
 }) => {
   const [filtro, setFiltro] = useState<FiltroPeriodo>('mes');
@@ -39,6 +39,15 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
   const [customHasta, setCustomHasta] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
+
+  // Filtros de la Matriz de Rentabilidad
+  const [filtroMatriz, setFiltroMatriz] = useState<'todos' | 'estrellas' | 'criticos' | 'estancados'>('todos');
+
+  // Filtros de Auditoría de Operaciones
+  const [mostrarAuditoria, setMostrarAuditoria] = useState<boolean>(false);
+  const [filtroAuditoriaTipo, setFiltroAuditoriaTipo] = useState<string>('todos');
+  const [filtroAuditoriaOperador, setFiltroAuditoriaOperador] = useState<string>('todos');
+  const [filtroAuditoriaSearch, setFiltroAuditoriaSearch] = useState<string>('');
 
   // Rango activo
   const activeRange = useMemo(() => {
@@ -58,6 +67,34 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
   const prevStats = useMemo(() => {
     return calcEstadisticas(movs, productos, prevRange.prevDesde, prevRange.prevHasta, prevRange.prevEtiqueta);
   }, [movs, productos, prevRange.prevDesde, prevRange.prevHasta, prevRange.prevEtiqueta]);
+
+  // Operadores disponibles en el histórico
+  const operadoresDisponibles = useMemo(() => {
+    const s = new Set<string>();
+    movs.forEach((m) => {
+      if (m.por && m.por.trim()) s.add(m.por.trim());
+    });
+    return Array.from(s).sort();
+  }, [movs]);
+
+  // Movimientos del período para el registro de auditoría
+  const movsAuditoriaFiltrados = useMemo(() => {
+    const list = movs.filter((m) => m.ts >= activeRange.desde && m.ts <= activeRange.hasta);
+    return list
+      .filter((m) => {
+        if (filtroAuditoriaTipo !== 'todos' && m.tipo !== filtroAuditoriaTipo) return false;
+        if (filtroAuditoriaOperador !== 'todos' && (m.por || '').trim().toLowerCase() !== filtroAuditoriaOperador.toLowerCase()) return false;
+        if (filtroAuditoriaSearch.trim()) {
+          const q = filtroAuditoriaSearch.trim().toLowerCase();
+          const prod = (m.producto || '').toLowerCase();
+          const cli = (m.cliente || '').toLowerCase();
+          const nota = (m.nota || '').toLowerCase();
+          if (!prod.includes(q) && !cli.includes(q) && !nota.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.ts - a.ts);
+  }, [movs, activeRange.desde, activeRange.hasta, filtroAuditoriaTipo, filtroAuditoriaOperador, filtroAuditoriaSearch]);
 
   // Navegación temporal rápida
   const handleNavPrev = () => {
@@ -80,7 +117,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
     setRefDate(new Date());
   };
 
-  // Lista de meses disponibles en los datos históricos para selector rápido
+  // Selector rápido de meses
   const mesesDisponibles = useMemo(() => {
     const monthsSet = new Set<string>();
     movs.forEach((m) => {
@@ -89,7 +126,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
       const mon = String(d.getMonth() + 1).padStart(2, '0');
       monthsSet.add(`${y}-${mon}`);
     });
-    // Agregar mes actual si está vacío
     const now = new Date();
     monthsSet.add(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
 
@@ -108,7 +144,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
       });
   }, [movs]);
 
-  // Función para cargar un cierre específico en la vista estadística
   const handleSeleccionarCierre = (cierre: CierreCaja) => {
     setFiltro('personalizado');
     const d1 = new Date(cierre.desde).toISOString().split('T')[0];
@@ -134,7 +169,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
   const varIngresos = calcVariacion(stats.ingresosTotal, prevStats.ingresosTotal);
   const varUnidades = calcVariacion(stats.unidadesVendidas, prevStats.unidadesVendidas);
 
-  // Escala para el gráfico de barras por día
+  // Escalas gráficas
   const maxVentaDia = useMemo(() => {
     return Math.max(...stats.ventasPorDia.map((d) => d.total), 1);
   }, [stats.ventasPorDia]);
@@ -143,9 +178,37 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
     return Math.max(...stats.topProductos.map((p) => p.unidades), 1);
   }, [stats.topProductos]);
 
+  const maxVentaHora = useMemo(() => {
+    return Math.max(...(stats.distribucionHoraria || []).map((h) => h.total), 1);
+  }, [stats.distribucionHoraria]);
+
+  // Productos de la Matriz filtrados
+  const rentabilidadFiltrada = useMemo(() => {
+    const lista = stats.rentabilidadProductos || [];
+    if (filtroMatriz === 'estrellas') {
+      return lista.filter((p) => p.clasificacion === 'estrella');
+    }
+    if (filtroMatriz === 'criticos') {
+      return lista.filter((p) => p.alertaAgotamiento);
+    }
+    if (filtroMatriz === 'estancados') {
+      return lista.filter((p) => p.clasificacion === 'estancado');
+    }
+    return lista;
+  }, [stats.rentabilidadProductos, filtroMatriz]);
+
+  const cantCriticos = (stats.rentabilidadProductos || []).filter((p) => p.alertaAgotamiento).length;
+  const cantEstrellas = (stats.rentabilidadProductos || []).filter((p) => p.clasificacion === 'estrella').length;
+  const cantEstancados = (stats.rentabilidadProductos || []).filter((p) => p.clasificacion === 'estancado').length;
+
+  const handleCompartirReporteWhatsApp = () => {
+    const texto = generarReporteEjecutivoWhatsApp(stats);
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* TARJETA DE FILTROS */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* TARJETA DE FILTROS & ACCIONES DE GERENCIA */}
       <div className="card">
         <div
           style={{
@@ -157,24 +220,49 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
             gap: 8,
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-            Filtrar período de estadísticas
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>📊</span> Inteligencia de Negocio & Estadísticas
+            </div>
+            <div className="sub" style={{ fontSize: '0.78rem' }}>
+              Análisis financiero, rotación de stock, horarios punta y auditoría
+            </div>
           </div>
-          <button
-            type="button"
-            className="btn-green"
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.85rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-            onClick={() => exportExcel(productos, movs, cierres)}
-            title="Descargar libro Excel con todas las hojas (.xlsx)"
-          >
-            📊 Exportar a Excel
-          </button>
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 600,
+              }}
+              onClick={handleCompartirReporteWhatsApp}
+              title="Compartir informe ejecutivo oficial por WhatsApp"
+            >
+              📲 Reporte WhatsApp
+            </button>
+            <button
+              type="button"
+              className="btn-green"
+              style={{
+                padding: '6px 12px',
+                fontSize: '0.82rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontWeight: 600,
+              }}
+              onClick={() => exportExcel(productos, movs, cierres)}
+              title="Descargar libro Excel con todas las hojas (.xlsx)"
+            >
+              📊 Exportar Excel
+            </button>
+          </div>
         </div>
 
         {/* Botones de filtro rápido */}
@@ -256,7 +344,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
             </button>
           </div>
         ) : (
-          /* Filtro de rango de fechas personalizado */
           <div className="row" style={{ marginTop: 6 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span className="sub">Desde:</span>
@@ -277,7 +364,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
           </div>
         )}
 
-        {/* Selector rápido de meses si el usuario está en filtro 'mes' */}
+        {/* Selector rápido de meses */}
         {filtro === 'mes' && mesesDisponibles.length > 1 && (
           <div className="row" style={{ marginTop: 8, alignItems: 'center' }}>
             <span className="sub" style={{ flex: 'none' }}>
@@ -361,12 +448,15 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
           <div className="amount">{fmt(stats.ticketPromedio)}</div>
         </div>
 
-        {/* Ganancia del período (calculada si hay costo unitario registrado) */}
+        {/* Ganancia del período */}
         <div className="item">
           <div>
             <div className="name">Ganancia bruta estimada</div>
             <div className="sub">
-              Ventas ({fmt(stats.ventasTotal)}) menos costo de lo vendido ({fmt(stats.costoTotal)})
+              Ventas ({fmt(stats.ventasTotal)}) menos costo ({fmt(stats.costoTotal)})
+              {stats.ventasTotal > 0 && (
+                <span> · Margen: <b>{Math.round((stats.gananciaTotal / stats.ventasTotal) * 100)}%</b></span>
+              )}
             </div>
           </div>
           <div className={`amount ${stats.gananciaTotal >= 0 ? 'ok' : 'debt'}`}>
@@ -374,6 +464,169 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* SECCIÓN 1 BI: PARTICIPACIÓN POR MEDIO DE PAGO */}
+      {stats.desgloseMedios && stats.desgloseMedios.length > 0 && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>💳</span> Cuota por Medio de Pago
+              </div>
+              <div className="sub" style={{ fontSize: '0.75rem' }}>
+                Distribución del dinero según el método de pago utilizado por los clientes
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {stats.desgloseMedios.map((mp) => {
+              const colorBar =
+                mp.medio === 'efectivo'
+                  ? 'var(--accent3)'
+                  : mp.medio === 'transferencia'
+                  ? 'var(--accent)'
+                  : mp.medio === 'debito'
+                  ? '#8b5cf6'
+                  : '#f97316';
+
+              return (
+                <div key={mp.medio}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600 }}>{mp.label}</span>
+                    <span>
+                      <b>{fmt(mp.total)}</b>{' '}
+                      <span className="sub" style={{ fontSize: '0.75rem' }}>
+                        ({mp.porcentaje}% · {mp.transacciones} ventas)
+                      </span>
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: 8,
+                      width: '100%',
+                      background: 'var(--border)',
+                      borderRadius: 4,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${mp.porcentaje}%`,
+                        background: colorBar,
+                        borderRadius: 4,
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SECCIÓN 2 BI: DISTRIBUCIÓN HORARIA & HORAS PUNTA DE VENTA */}
+      {stats.distribucionHoraria && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>⏰</span> Horas Punta & Flujo de Clientes
+              </div>
+              <div className="sub" style={{ fontSize: '0.75rem' }}>
+                Concentración de ventas a lo largo de las 24 horas del día
+              </div>
+            </div>
+
+            {stats.horaPico ? (
+              <div
+                style={{
+                  background: 'rgba(234, 179, 8, 0.15)',
+                  border: '1px solid rgba(234, 179, 8, 0.35)',
+                  color: '#eab308',
+                  padding: '4px 10px',
+                  borderRadius: 16,
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <span>🔥</span> Pico: {stats.horaPico.horaLabel} hrs ({fmt(stats.horaPico.total)})
+              </div>
+            ) : null}
+          </div>
+
+          {stats.ventasTotal === 0 ? (
+            <div className="empty">Sin ventas registradas en el período</div>
+          ) : (
+            <div>
+              {/* Gráfico horario 24h */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  gap: 3,
+                  height: 120,
+                  padding: '8px 2px 4px 2px',
+                  borderBottom: '1px solid var(--border)',
+                  overflowX: 'auto',
+                }}
+              >
+                {stats.distribucionHoraria.map((dh) => {
+                  const isPeak = stats.horaPico && stats.horaPico.hora === dh.hora;
+                  const heightPct = Math.max(Math.round((dh.total / maxVentaHora) * 100), dh.total > 0 ? 8 : 2);
+                  return (
+                    <div
+                      key={dh.hora}
+                      style={{
+                        flex: 1,
+                        minWidth: 12,
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                      }}
+                      title={`${dh.horaLabel} hrs: ${fmt(dh.total)} (${dh.transacciones} ventas, ${dh.unidades} un.)`}
+                    >
+                      <div
+                        style={{
+                          width: '85%',
+                          height: `${heightPct}%`,
+                          background: isPeak ? '#eab308' : dh.total > 0 ? 'var(--accent)' : 'var(--border)',
+                          borderRadius: '2px 2px 0 0',
+                          transition: 'height 0.2s',
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Horas de referencia */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  paddingTop: 4,
+                  fontSize: '0.7rem',
+                  color: 'var(--muted)',
+                }}
+              >
+                <span>00:00</span>
+                <span>06:00</span>
+                <span>12:00</span>
+                <span>18:00</span>
+                <span>23:00</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* GRÁFICO DE VENTAS POR DÍA */}
       <div className="card">
@@ -395,13 +648,12 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
           <div className="empty">No se registraron ventas en este período</div>
         ) : (
           <div style={{ marginTop: 10 }}>
-            {/* Visualización de barras vertical responsiva */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'flex-end',
                 gap: 4,
-                height: 140,
+                height: 130,
                 padding: '10px 4px 4px 4px',
                 borderBottom: '1px solid var(--border)',
                 overflowX: 'auto',
@@ -437,7 +689,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
               })}
             </div>
 
-            {/* Etiquetas de fechas en eje horizontal */}
             <div
               style={{
                 display: 'flex',
@@ -456,12 +707,8 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
               <span>{stats.ventasPorDia[stats.ventasPorDia.length - 1]?.fechaStr || ''}</span>
             </div>
 
-            {/* Días con mayor venta */}
             <div style={{ marginTop: 8, fontSize: '0.8rem', color: 'var(--muted)' }}>
-              Pico de venta del período:{' '}
-              <b style={{ color: 'var(--text)' }}>
-                {fmt(maxVentaDia)}
-              </b>
+              Pico de venta del período: <b style={{ color: 'var(--text)' }}>{fmt(maxVentaDia)}</b>
             </div>
           </div>
         )}
@@ -504,7 +751,6 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
                     </span>
                     <span className="name">{prod.nombre}</span>
                   </div>
-                  {/* Barra de progreso de volumen */}
                   <div
                     style={{
                       height: 5,
@@ -532,6 +778,249 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
               </div>
             );
           })
+        )}
+      </div>
+
+      {/* SECCIÓN 3 BI: MATRIZ DE RENTABILIDAD & ESTIMACIÓN DE STOCK */}
+      {stats.rentabilidadProductos && stats.rentabilidadProductos.length > 0 && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>📈</span> Matriz de Rentabilidad & Días de Stock
+              </div>
+              <div className="sub" style={{ fontSize: '0.75rem' }}>
+                Margen real, velocidad de venta y estimación de días restantes antes de agotar inventario
+              </div>
+            </div>
+
+            {/* Filtros rápidos de clasificación */}
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={filtroMatriz === 'todos' ? 'btn-primary' : 'btn-ghost'}
+                style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                onClick={() => setFiltroMatriz('todos')}
+              >
+                Todos ({stats.rentabilidadProductos.length})
+              </button>
+              {cantCriticos > 0 && (
+                <button
+                  type="button"
+                  className={filtroMatriz === 'criticos' ? 'btn-red' : 'btn-ghost'}
+                  style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                  onClick={() => setFiltroMatriz('criticos')}
+                >
+                  🚨 Críticos ({cantCriticos})
+                </button>
+              )}
+              {cantEstrellas > 0 && (
+                <button
+                  type="button"
+                  className={filtroMatriz === 'estrellas' ? 'btn-primary' : 'btn-ghost'}
+                  style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                  onClick={() => setFiltroMatriz('estrellas')}
+                >
+                  🌟 Estrellas ({cantEstrellas})
+                </button>
+              )}
+              {cantEstancados > 0 && (
+                <button
+                  type="button"
+                  className={filtroMatriz === 'estancados' ? 'btn-ghost' : 'btn-ghost'}
+                  style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                  onClick={() => setFiltroMatriz('estancados')}
+                >
+                  🧊 Sin venta ({cantEstancados})
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {rentabilidadFiltrada.slice(0, 15).map((p) => {
+              return (
+                <div
+                  key={p.productoId}
+                  style={{
+                    background: 'var(--bg)',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: p.alertaAgotamiento ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid var(--border)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{p.nombre}</span>
+                      {p.clasificacion === 'estrella' && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', fontWeight: 700 }}>
+                          🌟 Estrella
+                        </span>
+                      )}
+                      {p.clasificacion === 'rentable' && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', fontWeight: 700 }}>
+                          💎 Rentable
+                        </span>
+                      )}
+                      {p.clasificacion === 'volumen' && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', fontWeight: 700 }}>
+                          🐎 Volumen
+                        </span>
+                      )}
+                      {p.clasificacion === 'estancado' && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(107, 114, 128, 0.15)', color: '#9ca3af', fontWeight: 700 }}>
+                          🧊 Estancado
+                        </span>
+                      )}
+                      {p.alertaAgotamiento && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 10, background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', fontWeight: 800 }}>
+                          🚨 Quedan {p.diasInventarioRestante}d
+                        </span>
+                      )}
+                    </div>
+                    <div className="sub" style={{ fontSize: '0.75rem', marginTop: 3 }}>
+                      Stock actual: <b>{p.stockActual} un.</b> ·{' '}
+                      {p.diasInventarioRestante !== null ? (
+                        <span>Duración est.: <b>{p.diasInventarioRestante} días</b></span>
+                      ) : (
+                        <span>Sin rotación</span>
+                      )}
+                      {' '}· Margen: <b>{p.margenPct}%</b> ({fmt(p.margenUnit)}/un.)
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: p.gananciaTotal >= 0 ? 'var(--accent3)' : 'var(--accent2)' }}>
+                      {fmt(p.gananciaTotal)}
+                    </div>
+                    <div className="sub" style={{ fontSize: '0.72rem' }}>
+                      {p.unidadesVendidas} un. ({fmt(p.ventasTotal)})
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SECCIÓN 4 BI: REGISTRO DE AUDITORÍA DE OPERACIONES */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>🛡️</span> Registro de Auditoría de Operaciones
+            </div>
+            <div className="sub" style={{ fontSize: '0.75rem' }}>
+              Trazabilidad completa de ventas, cobros, entradas y mermas del período
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+            onClick={() => setMostrarAuditoria(!mostrarAuditoria)}
+          >
+            {mostrarAuditoria ? 'Ocultar ▲' : `Ver registros (${movsAuditoriaFiltrados.length}) ▼`}
+          </button>
+        </div>
+
+        {mostrarAuditoria && (
+          <div style={{ marginTop: 12 }}>
+            {/* Controles de filtro */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+              <input
+                type="text"
+                placeholder="Buscar por producto, cliente o nota..."
+                value={filtroAuditoriaSearch}
+                onChange={(e) => setFiltroAuditoriaSearch(e.target.value)}
+                style={{ flex: 1, minWidth: 160, fontSize: '0.82rem' }}
+              />
+              <select
+                value={filtroAuditoriaTipo}
+                onChange={(e) => setFiltroAuditoriaTipo(e.target.value)}
+                style={{ fontSize: '0.82rem' }}
+              >
+                <option value="todos">Todos los tipos</option>
+                <option value="venta">Ventas</option>
+                <option value="pago">Abonos / Pagos</option>
+                <option value="entrada">Entradas de stock</option>
+                <option value="merma">Mermas / Bajas</option>
+              </select>
+              <select
+                value={filtroAuditoriaOperador}
+                onChange={(e) => setFiltroAuditoriaOperador(e.target.value)}
+                style={{ fontSize: '0.82rem' }}
+              >
+                <option value="todos">Todos los operadores</option>
+                {operadoresDisponibles.map((op) => (
+                  <option key={op} value={op}>
+                    {op}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {movsAuditoriaFiltrados.length === 0 ? (
+              <div className="empty">No se encontraron operaciones con los filtros aplicados</div>
+            ) : (
+              <div style={{ maxHeight: 350, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {movsAuditoriaFiltrados.slice(0, 40).map((m, idx) => {
+                  const icon =
+                    m.tipo === 'venta'
+                      ? '🏷️'
+                      : m.tipo === 'pago'
+                      ? '💰'
+                      : m.tipo === 'entrada'
+                      ? '📦'
+                      : '🗑️';
+
+                  return (
+                    <div
+                      key={m.id || `${m.ts}-${idx}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'var(--bg)',
+                        fontSize: '0.82rem',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 140 }}>
+                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>{icon}</span>
+                          <span>{m.producto || m.cliente || 'Operación'}</span>
+                          {m.cant && <span>({m.cant} un.)</span>}
+                          {m.fiado && (
+                            <span style={{ fontSize: '0.68rem', padding: '1px 5px', borderRadius: 8, background: '#f97316', color: '#fff' }}>
+                              Fiado
+                            </span>
+                          )}
+                        </div>
+                        <div className="sub" style={{ fontSize: '0.72rem', marginTop: 1 }}>
+                          {fTs(m.ts)} {m.por ? `· Operador: ${m.por}` : ''}
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'right', fontWeight: 700 }}>
+                        <span className={m.tipo === 'venta' || m.tipo === 'pago' ? 'ok' : 'debt'}>
+                          {fmt(m.total || m.costoTotal || 0)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

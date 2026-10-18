@@ -9,6 +9,9 @@ import {
   EstadisticasPeriodo,
   VentaPorDiaItem,
   TopProductoItem,
+  DistribucionHorariaItem,
+  DesgloseMediosPagoItem,
+  ProductoRentabilidadItem,
 } from '../types';
 
 export const fTs = (t: number): string => {
@@ -321,9 +324,37 @@ export function calcEstadisticas(
   let ventasPag = 0;
   let pagos = 0;
   let costoTotal = 0;
+  let totalFiadoPeriodo = 0;
+  let totalMermasPeriodo = 0;
 
-  const diasMap: Record<string, { fechaStr: string; fechaCompleta: string; total: number; unidades: number }> = {};
-  const prodsMap: Record<string, { productoId: string; nombre: string; unidades: number; total: number }> = {};
+  // Medios de pago
+  const mediosContador: Record<string, { total: number; transacciones: number }> = {
+    efectivo: { total: 0, transacciones: 0 },
+    transferencia: { total: 0, transacciones: 0 },
+    debito: { total: 0, transacciones: 0 },
+    fiado: { total: 0, transacciones: 0 },
+  };
+
+  // Horas del día 0 a 23
+  const horasMap: Record<number, DistribucionHorariaItem> = {};
+  for (let h = 0; h < 24; h++) {
+    horasMap[h] = {
+      hora: h,
+      horaLabel: `${String(h).padStart(2, '0')}:00`,
+      total: 0,
+      transacciones: 0,
+      unidades: 0,
+    };
+  }
+
+  const diasMap: Record<
+    string,
+    { fechaStr: string; fechaCompleta: string; total: number; unidades: number }
+  > = {};
+  const prodsMap: Record<
+    string,
+    { productoId: string; nombre: string; unidades: number; total: number }
+  > = {};
 
   // Si el rango es menor o igual a 31 días, prellenamos los días intermedios con 0
   const totalDias = Math.round((hasta - desde) / (24 * 60 * 60 * 1000));
@@ -354,14 +385,41 @@ export function calcEstadisticas(
       ventasTotal += totalVenta;
       unidadesVendidas += cant;
       transaccionesCount++;
-      if (!m.fiado) ventasPag += totalVenta;
+
+      // Medios de pago
+      if (m.fiado) {
+        totalFiadoPeriodo += totalVenta;
+        mediosContador.fiado.total += totalVenta;
+        mediosContador.fiado.transacciones++;
+      } else {
+        ventasPag += totalVenta;
+        const mp = m.medioPago || 'efectivo';
+        if (mp === 'transferencia') {
+          mediosContador.transferencia.total += totalVenta;
+          mediosContador.transferencia.transacciones++;
+        } else if (mp === 'debito') {
+          mediosContador.debito.total += totalVenta;
+          mediosContador.debito.transacciones++;
+        } else {
+          mediosContador.efectivo.total += totalVenta;
+          mediosContador.efectivo.transacciones++;
+        }
+      }
 
       const pid = m.productoId || '';
       const unitCost = cu[pid] || 0;
       costoTotal += cant * unitCost;
 
-      // Agrupación por día
+      // Agrupación horaria
       const dObj = new Date(m.ts);
+      const hora = dObj.getHours();
+      if (horasMap[hora]) {
+        horasMap[hora].total += totalVenta;
+        horasMap[hora].transacciones++;
+        horasMap[hora].unidades += cant;
+      }
+
+      // Agrupación por día
       const y = dObj.getFullYear();
       const mon = String(dObj.getMonth() + 1).padStart(2, '0');
       const day = String(dObj.getDate()).padStart(2, '0');
@@ -392,6 +450,10 @@ export function calcEstadisticas(
       prodsMap[prodKey].total += totalVenta;
     } else if (m.tipo === 'pago') {
       pagos += m.total || 0;
+    } else if (m.tipo === 'merma') {
+      const pid = m.productoId || '';
+      const unitCost = cu[pid] || 0;
+      totalMermasPeriodo += (m.cant || 0) * unitCost;
     }
   });
 
@@ -402,6 +464,99 @@ export function calcEstadisticas(
   const topProductos: TopProductoItem[] = Object.values(prodsMap).sort(
     (a, b) => b.unidades - a.unidades || b.total - a.total
   );
+
+  const distribucionHoraria: DistribucionHorariaItem[] = Object.values(horasMap).sort(
+    (a, b) => a.hora - b.hora
+  );
+
+  // Determinar hora pico
+  let horaPico: { hora: number; horaLabel: string; total: number; transacciones: number } | null =
+    null;
+  distribucionHoraria.forEach((dh) => {
+    if (dh.total > 0 && (!horaPico || dh.total > horaPico.total)) {
+      horaPico = {
+        hora: dh.hora,
+        horaLabel: dh.horaLabel,
+        total: dh.total,
+        transacciones: dh.transacciones,
+      };
+    }
+  });
+
+  // Desglose de medios de pago
+  const mediosLabels: Record<string, string> = {
+    efectivo: '💵 Efectivo',
+    transferencia: '🏦 Transferencia',
+    debito: '💳 Débito / POS',
+    fiado: '🏷️ Fiado (Crédito)',
+  };
+
+  const desgloseMedios: DesgloseMediosPagoItem[] = Object.keys(mediosContador).map((k) => {
+    const item = mediosContador[k];
+    const pct = ventasTotal > 0 ? Math.round((item.total / ventasTotal) * 100) : 0;
+    return {
+      medio: k,
+      label: mediosLabels[k] || k,
+      total: item.total,
+      porcentaje: pct,
+      transacciones: item.transacciones,
+    };
+  });
+
+  // Matriz de rentabilidad y rotación por producto
+  const diasPeriodo = Math.max(1, Math.round((hasta - desde) / (24 * 60 * 60 * 1000)));
+  const rentabilidadProductos: ProductoRentabilidadItem[] = productos
+    .map((p) => {
+      const pv =
+        prodsMap[p.id] ||
+        Object.values(prodsMap).find(
+          (x) => x.nombre.toLowerCase() === p.nombre.toLowerCase()
+        );
+      const unVend = pv?.unidades || 0;
+      const vTot = pv?.total || 0;
+      const unitCost = cu[p.id] || 0;
+      const precioVenta = p.precio || (unVend > 0 ? Math.round(vTot / unVend) : 0);
+      const margenUnit = precioVenta - unitCost;
+      const margenPct = precioVenta > 0 ? Math.round((margenUnit / precioVenta) * 100) : 0;
+      const gananciaTotal = unVend * margenUnit;
+      const stockActual = stockDe(p.id, movs);
+      const velVentasDiarias = unVend / diasPeriodo;
+      const diasInventario =
+        velVentasDiarias > 0 ? Math.round(stockActual / velVentasDiarias) : null;
+      const alertaAgotamiento =
+        stockActual > 0 && diasInventario !== null && diasInventario <= 3;
+
+      let clasificacion: 'estrella' | 'rentable' | 'volumen' | 'estancado' | 'estandar' =
+        'estandar';
+      if (stockActual > 0 && unVend === 0) {
+        clasificacion = 'estancado';
+      } else if (margenPct >= 35 && unVend >= 5) {
+        clasificacion = 'estrella';
+      } else if (margenPct >= 35) {
+        clasificacion = 'rentable';
+      } else if (unVend >= 5) {
+        clasificacion = 'volumen';
+      }
+
+      return {
+        productoId: p.id,
+        nombre: p.nombre,
+        precioVenta,
+        costoUnit: unitCost,
+        margenUnit,
+        margenPct,
+        unidadesVendidas: unVend,
+        ventasTotal: vTot,
+        gananciaTotal,
+        stockActual,
+        diasInventarioRestante: diasInventario,
+        clasificacion,
+        alertaAgotamiento,
+      };
+    })
+    .sort(
+      (a, b) => b.gananciaTotal - a.gananciaTotal || b.unidadesVendidas - a.unidadesVendidas
+    );
 
   return {
     desde,
@@ -416,7 +571,75 @@ export function calcEstadisticas(
     ticketPromedio: transaccionesCount > 0 ? ventasTotal / transaccionesCount : 0,
     ventasPorDia,
     topProductos,
+    distribucionHoraria,
+    horaPico,
+    desgloseMedios,
+    rentabilidadProductos,
+    totalFiadoPeriodo,
+    totalMermasPeriodo,
   };
+}
+
+export function generarReporteEjecutivoWhatsApp(
+  stats: EstadisticasPeriodo,
+  nombreTienda = 'Ventas Score'
+): string {
+  const margenGlobal =
+    stats.ventasTotal > 0
+      ? Math.round((stats.gananciaTotal / stats.ventasTotal) * 100)
+      : 0;
+
+  const top3 = stats.topProductos
+    .slice(0, 3)
+    .map((p, i) => `${i + 1}. ${p.nombre} - ${p.unidades} un. (${fmt(p.total)})`)
+    .join('\n');
+
+  const mediosStr = stats.desgloseMedios
+    ? stats.desgloseMedios
+        .map((m) => `• ${m.label}: ${fmt(m.total)} (${m.porcentaje}%)`)
+        .join('\n')
+    : '';
+
+  const agotando = stats.rentabilidadProductos
+    ? stats.rentabilidadProductos.filter((p) => p.alertaAgotamiento)
+    : [];
+
+  const lines = [
+    `📊 INFORME EJECUTIVO - ${nombreTienda}`,
+    `Período: ${stats.etiqueta}`,
+    `Fecha emisión: ${fTs(Date.now())}`,
+    `----------------------------------------`,
+    `RESUMEN COMERCIAL`,
+    `• Ventas Totales: ${fmt(stats.ventasTotal)} (${stats.transaccionesCount} operaciones)`,
+    `• Unidades Vendidas: ${stats.unidadesVendidas} un.`,
+    `• Dinero Ingresado: ${fmt(stats.ingresosTotal)}`,
+    `• Ganancia Bruta Estimada: ${fmt(stats.gananciaTotal)} (${margenGlobal}% margen)`,
+    `• Ticket Promedio: ${fmt(stats.ticketPromedio)}`,
+    stats.totalFiadoPeriodo
+      ? `• Crédito / Fiados Otorgados: ${fmt(stats.totalFiadoPeriodo)}`
+      : null,
+    stats.totalMermasPeriodo
+      ? `• Pérdidas por Mermas: ${fmt(stats.totalMermasPeriodo)}`
+      : null,
+    `----------------------------------------`,
+    `MEDIOS DE PAGO`,
+    mediosStr,
+    `----------------------------------------`,
+    stats.horaPico
+      ? `HORA PICO DE VENTA: ⏰ ${stats.horaPico.horaLabel} hrs (${fmt(stats.horaPico.total)})`
+      : null,
+    top3 ? `----------------------------------------\nTOP PRODUCTOS:\n${top3}` : null,
+    agotando.length > 0
+      ? `----------------------------------------\n🚨 ALERTA INVENTARIO (Por agotar en <= 3 días):\n${agotando
+          .slice(0, 3)
+          .map((p) => `• ${p.nombre}: ${p.stockActual} un. restantes`)
+          .join('\n')}`
+      : null,
+    `----------------------------------------`,
+    `Sistema de Gestión Ventas Score`,
+  ].filter(Boolean);
+
+  return lines.join('\n');
 }
 
 export interface ConciliacionCierre {
