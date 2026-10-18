@@ -63,6 +63,9 @@ import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { ModalCerrarCaja } from './components/ModalCerrarCaja';
 import { ModalDetalleCierre } from './components/ModalDetalleCierre';
+import { ModalMenuAdmin } from './components/ModalMenuAdmin';
+import { ModalNuevoProducto } from './components/ModalNuevoProducto';
+import { ModalNuevaDeuda } from './components/ModalNuevaDeuda';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
 import {
   initializePushNotifications,
@@ -76,6 +79,8 @@ export const ADMIN_EMAILS = [
   'benja.chavez34@gmail.com',
   'fco.inzunza.re@gmail.com',
 ];
+
+export const ADMIN_ONLY_TABS = ['resumen', 'estadisticas', 'equipo', 'configuracion'];
 
 export const isUserAdmin = (email?: string | null): boolean => {
   try {
@@ -462,6 +467,11 @@ export default function App() {
     isOpen: boolean;
     cierre: CierreCaja | null;
   }>({ isOpen: false, cierre: null });
+
+  // Modales de Simplificación y Desaturación (Fase A)
+  const [modalMenuAdminOpen, setModalMenuAdminOpen] = useState<boolean>(false);
+  const [modalNuevoProductoOpen, setModalNuevoProductoOpen] = useState<boolean>(false);
+  const [modalNuevaDeudaOpen, setModalNuevaDeudaOpen] = useState<boolean>(false);
 
   // Modal Entrada de Mercadería
   const [modalEntrada, setModalEntrada] = useState<{
@@ -2016,6 +2026,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       setDPrecio('');
       setDMonto('');
       setDProductoId('');
+      setModalNuevaDeudaOpen(false);
+      showToast(`✓ Deuda de ${nombre} registrada exitosamente`);
     }
   };
 
@@ -2244,6 +2256,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       setPStockMinimo('3');
       setPCategoria('Bebidas Energéticas');
       setScannedFeedback(null);
+      setModalNuevoProductoOpen(false);
       showToast(`Stock de "${nombre}" agregado`);
       return;
     }
@@ -2290,6 +2303,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       setPStockMinimo('3');
       setPCategoria('Bebidas Energéticas');
       setScannedFeedback(null);
+      setModalNuevoProductoOpen(false);
       showToast(`Stock de "${nombre}" agregado`);
     } catch (e: any) {
       alert('No se pudo guardar: ' + (e?.message || e));
@@ -2752,8 +2766,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
   const isAdmin = isUserAdmin(user?.email);
 
   useEffect(() => {
-    const adminOnlyTabs = ['resumen', 'estadisticas', 'equipo', 'configuracion'];
-    if (!isAdmin && adminOnlyTabs.includes(activeTab)) {
+    if (!isAdmin && ADMIN_ONLY_TABS.includes(activeTab)) {
       setActiveTab('venta');
     }
   }, [isAdmin, activeTab]);
@@ -3848,16 +3861,16 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               🧾 Venta
             </div>
             <div
-              className={`tab ${activeTab === 'deudores' ? 'active' : ''}`}
-              onClick={() => setActiveTab('deudores')}
-            >
-              👥 Deudores
-            </div>
-            <div
               className={`tab ${activeTab === 'stock' ? 'active' : ''}`}
               onClick={() => setActiveTab('stock')}
             >
               📦 Stock
+            </div>
+            <div
+              className={`tab ${activeTab === 'deudores' ? 'active' : ''}`}
+              onClick={() => setActiveTab('deudores')}
+            >
+              👥 Deudores
             </div>
             <div
               className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
@@ -3868,7 +3881,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               }}
               style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              <span>👥 Miembros & Chat</span>
+              <span>💬 Equipo</span>
               {mensajesNoLeidos > 0 && activeTab !== 'miembros' && (
                 <span
                   style={{
@@ -3885,43 +3898,78 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                 </span>
               )}
             </div>
-            {isAdmin && (
-              <>
-                <div
-                  className={`tab ${activeTab === 'resumen' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('resumen')}
-                >
-                  💰 Resumen
-                </div>
-                <div
-                  className={`tab ${activeTab === 'estadisticas' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('estadisticas')}
-                >
-                  📊 Estadísticas
-                </div>
-                <div
-                  className={`tab ${activeTab === 'equipo' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('equipo')}
-                >
-                  🏢 Supervisión
-                </div>
-                <div
-                  className={`tab ${activeTab === 'configuracion' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('configuracion')}
-                >
-                  ⚙️ Configuración
-                </div>
-              </>
-            )}
+
             <div
-              className={`tab ${activeTab === 'ayuda' ? 'active' : ''}`}
-              onClick={() => setActiveTab('ayuda')}
+              className={`tab ${['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) ? 'active' : ''}`}
+              onClick={() => setModalMenuAdminOpen(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              🤖 Ayuda IA
+              <span>☰ {isAdmin ? 'Administración' : 'Más'}</span>
+              {['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) && (
+                <span style={{ fontSize: '0.72rem', opacity: 0.85 }}>
+                  ({activeTab === 'resumen' ? 'Caja' : activeTab === 'estadisticas' ? 'BI' : activeTab === 'equipo' ? 'Equipo' : activeTab === 'configuracion' ? 'Config' : 'IA'})
+                </span>
+              )}
             </div>
           </div>
 
           <main>
+            {/* BREADCRUMB / RETORNO PARA VISTAS ADMINISTRATIVAS */}
+            {['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  marginBottom: 12,
+                  background: 'rgba(37, 99, 235, 0.10)',
+                  border: '1px solid rgba(37, 99, 235, 0.25)',
+                  borderRadius: 10,
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setActiveTab('venta')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 8px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    color: 'var(--accent)',
+                  }}
+                >
+                  <span>← Volver al Punto de Venta</span>
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    {activeTab === 'resumen'
+                      ? '💰 Caja & Cierres'
+                      : activeTab === 'estadisticas'
+                      ? '📊 Estadísticas BI'
+                      : activeTab === 'equipo'
+                      ? '🏢 Supervisión'
+                      : activeTab === 'configuracion'
+                      ? '⚙️ Configuración'
+                      : '🤖 ScoreBot IA'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => setModalMenuAdminOpen(true)}
+                    style={{ padding: '2px 8px', fontSize: '0.76rem', color: 'var(--muted)', borderRadius: 6 }}
+                    title="Abrir menú de administración"
+                  >
+                    ☰ Menú
+                  </button>
+                </div>
+              </div>
+            )}
             {/* VIEW VENTA */}
             {activeTab === 'venta' && (
               <section id="viewVenta">
@@ -4587,81 +4635,28 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
             {/* VIEW DEUDORES */}
             {activeTab === 'deudores' && (
               <section id="viewDeudores">
-                <div className="card">
-                  <div className="sub" style={{ marginBottom: 6, fontWeight: 600 }}>
-                    Agregar deuda (si eliges producto, se descuenta del stock)
+                {/* BARRA SUPERIOR DE DEUDORES: TÍTULO Y BOTÓN REGISTRAR DEUDA */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>👥 Cartera de Clientes & Deudores</span>
                   </div>
-                  <div className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                    <div>
-                      <input
-                        ref={dNombreInputRef}
-                        placeholder="Nombre del deudor / cliente"
-                        list="listaClientes"
-                        value={dNombre}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setDNombre(val);
-                          const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                          if (clientes[k]?.telefono && (!dTelefono || dTelefono === '+56 9 ')) {
-                            setDTelefono(clientes[k].telefono || '');
-                          }
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="tel"
-                        placeholder="WhatsApp (+56 9...)"
-                        value={dTelefono}
-                        onChange={(e) => setDTelefono(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="row">
-                    <select
-                      value={dProductoId}
-                      onChange={(e) => handleDProductoChange(e.target.value)}
-                    >
-                      <option value="">— Solo monto (sin producto) —</option>
-                      {productos.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.nombre} (stock: {stockDe(p.id, movs)})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row">
-                    <input
-                      type="number"
-                      placeholder="Cantidad"
-                      value={dCantidad}
-                      onChange={(e) => handleDCantidadChange(e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      placeholder="Precio unit."
-                      value={dPrecio}
-                      onChange={(e) => handleDPrecioChange(e.target.value)}
-                    />
-                  </div>
-                  <div className="row">
-                    <input
-                      type="number"
-                      placeholder="Monto $"
-                      value={dMonto}
-                      onChange={(e) => setDMonto(e.target.value)}
-                    />
-                  </div>
-                  <div className="row">
-                    <button className="btn-primary" onClick={handleAgregarDeuda}>
-                      + Agregar deuda
-                    </button>
-                  </div>
-                  {selectedDProd && (
-                    <div className="sub" style={{ marginTop: 6 }}>
-                      Stock disponible: {stockDe(selectedDProd.id, movs)}
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setModalNuevaDeudaOpen(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '7px 14px',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                      boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)',
+                    }}
+                  >
+                    <span>+ Registrar Deuda Manual</span>
+                  </button>
                 </div>
 
                 <div className="total-bar">
@@ -5119,6 +5114,26 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               <section id="viewStock">
                 {/* BARRA SUPERIOR DE ACCIONES RÁPIDAS DE INVENTARIO */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setModalNuevoProductoOpen(true)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '8px 14px',
+                        fontSize: '0.86rem',
+                        fontWeight: 800,
+                        background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                        boxShadow: '0 4px 14px rgba(22,163,74,0.3)',
+                      }}
+                    >
+                      <span>+ Nuevo Producto</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     className="btn-primary"
@@ -5243,200 +5258,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   </div>
                 )}
 
-                {/* FORMULARIO AGREGAR PRODUCTO (SOLO ADMINS) */}
-                {isAdmin ? (
-                  <div className="card" style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span>⚡ Administrar Stock e Ingreso de Productos</span>
-                        </div>
-                        <div className="sub" style={{ fontSize: '0.8rem', marginTop: 2 }}>
-                          Escanea con la cámara o ingresa el código de barra para autocompletar el nombre y evitar errores.
-                        </div>
-                      </div>
-                    </div>
 
-                    {scannedFeedback && (
-                      <div
-                        style={{
-                          padding: '10px 14px',
-                          borderRadius: 10,
-                          marginBottom: 12,
-                          fontSize: '0.82rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 8,
-                          background:
-                            scannedFeedback.type === 'success'
-                              ? 'rgba(22, 163, 74, 0.12)'
-                              : 'rgba(37, 99, 235, 0.12)',
-                          border: `1px solid ${
-                            scannedFeedback.type === 'success' ? 'rgba(22, 163, 74, 0.35)' : 'rgba(37, 99, 235, 0.35)'
-                          }`,
-                          color: 'var(--text)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: '1.1rem' }}>
-                            {scannedFeedback.type === 'success' ? '✨' : 'ℹ️'}
-                          </span>
-                          <div>{scannedFeedback.msg}</div>
-                        </div>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          style={{ padding: '2px 8px', fontSize: '0.75rem' }}
-                          onClick={() => setScannedFeedback(null)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Código de Barra (EAN-13 / UPC):
-                        </label>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <input
-                            placeholder="Ej: 7801610006733"
-                            value={pCodigoBarra}
-                            onChange={(e) => handleBarcodeManualChange(e.target.value)}
-                            style={{ fontSize: '0.86rem' }}
-                          />
-                          <button
-                            type="button"
-                            className="btn-ghost"
-                            title="Abrir cámara escáner"
-                            onClick={() => setScannerOpen(true)}
-                            style={{ padding: '0 10px', fontSize: '1rem' }}
-                          >
-                            📷
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Nombre del producto:
-                        </label>
-                        <input
-                          placeholder="Ej: Bebida Score Original 500ml"
-                          value={pNombre}
-                          onChange={(e) => setPNombre(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Categoría:
-                        </label>
-                        <input
-                          placeholder="Ej: Bebidas Energéticas"
-                          list="listaCategoriasForm"
-                          value={pCategoria}
-                          onChange={(e) => setPCategoria(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                        <datalist id="listaCategoriasForm">
-                          <option value="Bebidas Energéticas" />
-                          <option value="Snacks y Barras" />
-                          <option value="Bebidas y Jugos" />
-                          <option value="Accesorios" />
-                          {categoriasDisponibles.map((c) => (
-                            <option key={c} value={c} />
-                          ))}
-                        </datalist>
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Cantidad comprada / a sumar:
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Ej: 24"
-                          value={pStock}
-                          onChange={(e) => setPStock(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Costo TOTAL de la compra $:
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Ej: 21600"
-                          value={pCosto}
-                          onChange={(e) => setPCosto(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Precio de venta unitario $:
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="Ej: 1500"
-                          value={pPrecio}
-                          onChange={(e) => setPPrecio(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
-                          Stock mínimo de alerta:
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="3"
-                          min="1"
-                          value={pStockMinimo}
-                          onChange={(e) => setPStockMinimo(e.target.value)}
-                          style={{ fontSize: '0.86rem' }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="row" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={handleAgregarProducto}
-                        style={{ padding: '9px 20px', fontWeight: 700 }}
-                      >
-                        + Registrar producto / Entrada
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="card"
-                    style={{
-                      background: 'rgba(37,99,235,0.06)',
-                      border: '1px solid rgba(37,99,235,0.22)',
-                      padding: '14px 18px',
-                      marginBottom: 14,
-                      borderRadius: 14,
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: '0.96rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span>📦 Consulta de Existencias de Stock</span>
-                    </div>
-                    <div className="sub" style={{ marginTop: 4, fontSize: '0.82rem', lineHeight: 1.45 }}>
-                      Aquí puedes revisar las cantidades disponibles para venta y el precio unitario establecido. El ingreso de compras y administración de productos está reservado para los administradores.
-                    </div>
-                  </div>
-                )}
 
                 {/* FILTROS POR CATEGORÍA Y ESTADO */}
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -5985,6 +5807,65 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               </section>
             )}
           </main>
+
+          {/* BOTTOM NAVIGATION BAR PARA MÓVILES */}
+          <nav className="bottom-nav-bar">
+            <button
+              type="button"
+              className={`bottom-nav-item ${activeTab === 'venta' ? 'active' : ''}`}
+              onClick={() => setActiveTab('venta')}
+            >
+              <span className="bottom-nav-icon">🧾</span>
+              <span className="bottom-nav-label">Venta</span>
+            </button>
+
+            <button
+              type="button"
+              className={`bottom-nav-item ${activeTab === 'stock' ? 'active' : ''}`}
+              onClick={() => setActiveTab('stock')}
+            >
+              <span className="bottom-nav-icon">📦</span>
+              <span className="bottom-nav-label">Stock</span>
+            </button>
+
+            <button
+              type="button"
+              className={`bottom-nav-item ${activeTab === 'deudores' ? 'active' : ''}`}
+              onClick={() => setActiveTab('deudores')}
+            >
+              <span className="bottom-nav-icon">👥</span>
+              <span className="bottom-nav-label">Deudores</span>
+            </button>
+
+            <button
+              type="button"
+              className={`bottom-nav-item ${activeTab === 'miembros' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('miembros');
+                setMensajesNoLeidos(0);
+                setInAppBanner(null);
+              }}
+              style={{ position: 'relative' }}
+            >
+              <span className="bottom-nav-icon">💬</span>
+              <span className="bottom-nav-label">Equipo</span>
+              {mensajesNoLeidos > 0 && activeTab !== 'miembros' && (
+                <span className="bottom-nav-badge">{mensajesNoLeidos}</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className={`bottom-nav-item ${['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) ? 'active' : ''}`}
+              onClick={() => setModalMenuAdminOpen(true)}
+            >
+              <span className="bottom-nav-icon">☰</span>
+              <span className="bottom-nav-label">{isAdmin ? 'Admin' : 'Más'}</span>
+              {['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) && (
+                <span className="bottom-nav-dot" />
+              )}
+            </button>
+          </nav>
         </div>
       )}
       </div>
@@ -7795,6 +7676,84 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
           </button>
         </div>
       )}
+
+      {/* MODAL MENU ADMIN & HERRAMIENTAS (FASE A) */}
+      <ModalMenuAdmin
+        isOpen={modalMenuAdminOpen}
+        onClose={() => setModalMenuAdminOpen(false)}
+        isAdmin={isAdmin}
+        activeTab={activeTab}
+        onSelectTab={(tab) => {
+          if (!isAdmin && ADMIN_ONLY_TABS.includes(tab)) {
+            showToast('Acceso restringido a administradores', 'debt');
+            return;
+          }
+          setActiveTab(tab as any);
+        }}
+        userName={perfil.nombre || miNombre}
+        userRole={perfil.rol}
+        avatarId={perfil.avatarId}
+        onOpenMiCuenta={() => {
+          setEditPerfil(perfil);
+          setModalCuentaOpen(true);
+        }}
+        onLogout={handleLogout}
+      />
+
+      {/* MODAL NUEVO PRODUCTO / ENTRADA STOCK (FASE A) */}
+      <ModalNuevoProducto
+        isOpen={modalNuevoProductoOpen}
+        onClose={() => {
+          setModalNuevoProductoOpen(false);
+          setScannedFeedback(null);
+        }}
+        onGuardar={handleAgregarProducto}
+        onOpenScanner={() => setScannerOpen(true)}
+        codigoBarra={pCodigoBarra}
+        setCodigoBarra={setPCodigoBarra}
+        nombre={pNombre}
+        setNombre={setPNombre}
+        categoria={pCategoria}
+        setCategoria={setPCategoria}
+        stock={pStock}
+        setStock={setPStock}
+        costo={pCosto}
+        setCosto={setPCosto}
+        precio={pPrecio}
+        setPrecio={setPPrecio}
+        stockMinimo={pStockMinimo}
+        setStockMinimo={setPStockMinimo}
+        scannedFeedback={scannedFeedback}
+        setScannedFeedback={setScannedFeedback}
+        categoriasDisponibles={categoriasDisponibles}
+        handleBarcodeManualChange={handleBarcodeManualChange}
+      />
+
+      {/* MODAL NUEVA DEUDA MANUAL (FASE A) */}
+      <ModalNuevaDeuda
+        isOpen={modalNuevaDeudaOpen}
+        onClose={() => setModalNuevaDeudaOpen(false)}
+        onGuardar={handleAgregarDeuda}
+        nombre={dNombre}
+        setNombre={setDNombre}
+        telefono={dTelefono}
+        setTelefono={setDTelefono}
+        productoId={dProductoId}
+        setProductoId={setDProductoId}
+        cantidad={dCantidad}
+        setCantidad={setDCantidad}
+        precio={dPrecio}
+        setPrecio={setDPrecio}
+        monto={dMonto}
+        setMonto={setDMonto}
+        productos={productos}
+        clientNames={clientNames}
+        stockDe={(id) => stockDe(id, movs)}
+        handleProductoChange={handleDProductoChange}
+        handleCantidadChange={handleDCantidadChange}
+        handlePrecioChange={handleDPrecioChange}
+        clientes={clientes}
+      />
     </>
   );
 }
