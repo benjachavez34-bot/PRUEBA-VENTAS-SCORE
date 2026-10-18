@@ -32,7 +32,7 @@ export function stockDe(pid: string, movs: Movimiento[]): number {
   return movs.reduce((s, m) => {
     if (m.productoId !== pid) return s;
     if (m.tipo === 'entrada') return s + (m.cant || 0);
-    if (m.tipo === 'venta') return s - (m.cant || 0);
+    if (m.tipo === 'venta' || m.tipo === 'merma') return s - (m.cant || 0);
     return s;
   }, 0);
 }
@@ -165,6 +165,8 @@ export function calcResumen(
   let ventasPag = 0;
   let pagos = 0;
   let n = 0;
+  let costoMerma = 0;
+  let mermasCant = 0;
   const porP: Record<string, { inv: number; vend: number; costo: number }> = {};
 
   movs.forEach((m) => {
@@ -187,6 +189,10 @@ export function calcResumen(
         porP[pid].costo += c;
       }
       if (!m.fiado) ventasPag += m.total || 0;
+    } else if (m.tipo === 'merma') {
+      const c = (m.cant || 0) * (cu[pid] || 0);
+      costoMerma += c;
+      mermasCant += m.cant || 0;
     } else if (m.tipo === 'pago') {
       pagos += m.total || 0;
     }
@@ -202,6 +208,8 @@ export function calcResumen(
     ganancia: vend - costoV,
     ventas: n,
     porP,
+    costoMerma,
+    mermasCant,
   };
 }
 

@@ -40,6 +40,7 @@ import {
   CartItem,
   TicketVenta,
   MedioPago,
+  MotivoMerma,
 } from './types';
 import {
   fTs,
@@ -386,17 +387,41 @@ export default function App() {
     }));
   };
 
-  // Stock Form State
+  // Stock Form State & Control de Inventario
   const [pNombre, setPNombre] = useState<string>('');
   const [pStock, setPStock] = useState<string>('');
   const [pCosto, setPCosto] = useState<string>('');
   const [pPrecio, setPPrecio] = useState<string>('');
   const [pCodigoBarra, setPCodigoBarra] = useState<string>('');
+  const [pStockMinimo, setPStockMinimo] = useState<string>('3');
+  const [pCategoria, setPCategoria] = useState<string>('Bebidas Energéticas');
+  const [filtroCategoriaStock, setFiltroCategoriaStock] = useState<string>('todas');
+  const [filtroCategoriaPos, setFiltroCategoriaPos] = useState<string>('todas');
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
   const [scannedFeedback, setScannedFeedback] = useState<{
     msg: string;
     type: 'success' | 'info' | 'warn';
   } | null>(null);
+
+  // Modal para Registro de Mermas / Bajas
+  const [modalMerma, setModalMerma] = useState<{
+    isOpen: boolean;
+    producto: Producto | null;
+    cant: string;
+    motivo: MotivoMerma;
+    nota: string;
+    error: string | null;
+  }>({
+    isOpen: false,
+    producto: null,
+    cant: '1',
+    motivo: 'rotura',
+    nota: '',
+    error: null,
+  });
+
+  // Modal Historial de Mermas
+  const [modalHistorialMermas, setModalHistorialMermas] = useState<boolean>(false);
 
   // Modal de Abono / Pago
   const [modalAbono, setModalAbono] = useState<{
@@ -2146,6 +2171,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     const precio = parseFloat(pPrecio) || 0;
     const costo = parseFloat(pCosto) || 0;
     const codigoBarra = pCodigoBarra.trim();
+    const stockMinimo = parseFloat(pStockMinimo) || 3;
+    const categoria = pCategoria.trim() || undefined;
 
     if (!nombre || isNaN(stock) || stock < 0) {
       return alert('Ingresa nombre y stock válido');
@@ -2172,11 +2199,20 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                 nombre,
                 precio: precio || item.precio,
                 codigoBarra: codigoBarra || item.codigoBarra,
+                stockMinimo: stockMinimo || item.stockMinimo || 3,
+                categoria: categoria || item.categoria,
               }
             : item
         );
       } else {
-        updatedProds.push({ id, nombre, precio, ...(codigoBarra ? { codigoBarra } : {}) });
+        updatedProds.push({
+          id,
+          nombre,
+          precio,
+          stockMinimo,
+          ...(codigoBarra ? { codigoBarra } : {}),
+          ...(categoria ? { categoria } : {}),
+        });
       }
       setProductos(updatedProds);
       try {
@@ -2197,6 +2233,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       setPCosto('');
       setPPrecio('');
       setPCodigoBarra('');
+      setPStockMinimo('3');
+      setPCategoria('Bebidas Energéticas');
       setScannedFeedback(null);
       showToast(`Stock de "${nombre}" agregado`);
       return;
@@ -2214,12 +2252,15 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         const updateData: Partial<Producto> = {};
         if (precio) updateData.precio = precio;
         if (codigoBarra && !p.codigoBarra) updateData.codigoBarra = codigoBarra;
+        if (stockMinimo) updateData.stockMinimo = stockMinimo;
+        if (categoria) updateData.categoria = categoria;
         if (Object.keys(updateData).length > 0) {
           await updateDoc(doc(db, 'productos', id), updateData);
         }
       } else {
-        const docData: any = { nombre, precio };
+        const docData: any = { nombre, precio, stockMinimo };
         if (codigoBarra) docData.codigoBarra = codigoBarra;
+        if (categoria) docData.categoria = categoria;
         const docRef = await addDoc(collection(db, 'productos'), docData);
         id = docRef.id;
       }
@@ -2238,10 +2279,75 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       setPCosto('');
       setPPrecio('');
       setPCodigoBarra('');
+      setPStockMinimo('3');
+      setPCategoria('Bebidas Energéticas');
       setScannedFeedback(null);
       showToast(`Stock de "${nombre}" agregado`);
     } catch (e: any) {
       alert('No se pudo guardar: ' + (e?.message || e));
+    }
+  };
+
+  const handleOpenMerma = (prodId?: string) => {
+    let p = prodId ? productos.find((x) => x.id === prodId) || null : null;
+    if (!p && productos.length > 0) p = productos[0];
+    setModalMerma({
+      isOpen: true,
+      producto: p,
+      cant: '1',
+      motivo: 'rotura',
+      nota: '',
+      error: null,
+    });
+  };
+
+  const handleConfirmarMerma = async () => {
+    if (!modalMerma.producto) {
+      setModalMerma((prev) => ({ ...prev, error: 'Selecciona un producto' }));
+      return;
+    }
+    const c = parseFloat(modalMerma.cant);
+    if (isNaN(c) || c <= 0) {
+      setModalMerma((prev) => ({ ...prev, error: 'Ingresa una cantidad válida mayor a 0' }));
+      return;
+    }
+
+    const available = stockDe(modalMerma.producto.id, movs);
+    if (c > available) {
+      const cont = window.confirm(
+        `El stock registrado de ${modalMerma.producto.nombre} es ${available}. ¿Deseas registrar la baja de ${c} unidades de todas formas?`
+      );
+      if (!cont) return;
+    }
+
+    const p = modalMerma.producto;
+    const ok = await addMov({
+      tipo: 'merma',
+      productoId: p.id,
+      producto: p.nombre,
+      cant: c,
+      motivoMerma: modalMerma.motivo,
+      nota: modalMerma.nota.trim() || undefined,
+    });
+
+    if (ok) {
+      const motivoLabels: Record<MotivoMerma, string> = {
+        rotura: 'Rotura / Daño',
+        vencimiento: 'Vencimiento',
+        degustacion: 'Degustación / Muestra',
+        consumo_interno: 'Consumo Interno',
+        perdida: 'Pérdida / Extravío',
+        otro: 'Otro',
+      };
+      showToast(`⚠️ Baja registrada: ${c} unid. de ${p.nombre} (${motivoLabels[modalMerma.motivo]})`, 'debt');
+      setModalMerma({
+        isOpen: false,
+        producto: null,
+        cant: '1',
+        motivo: 'rotura',
+        nota: '',
+        error: null,
+      });
     }
   };
 
@@ -2473,6 +2579,51 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     });
     return { alDia, atencion, critico };
   }, [deudoresList]);
+
+  // Control de Stock, Alertas y Categorías (Fase 3)
+  const productosBajoStock = useMemo(() => {
+    return productos
+      .map((p) => {
+        const stk = stockDe(p.id, movs);
+        const min = p.stockMinimo !== undefined ? p.stockMinimo : 3;
+        return {
+          producto: p,
+          stock: stk,
+          stockMinimo: min,
+          isAgotado: stk <= 0,
+          isBajo: stk > 0 && stk <= min,
+        };
+      })
+      .filter((item) => item.isAgotado || item.isBajo);
+  }, [productos, movs]);
+
+  const categoriasDisponibles = useMemo(() => {
+    const setCats = new Set<string>();
+    productos.forEach((p) => {
+      if (p.categoria && p.categoria.trim()) {
+        setCats.add(p.categoria.trim());
+      }
+    });
+    return Array.from(setCats).sort((a, b) => a.localeCompare(b));
+  }, [productos]);
+
+  const productosFiltradosStock = useMemo(() => {
+    return productos.filter((p) => {
+      if (filtroCategoriaStock === 'todas') return true;
+      if (filtroCategoriaStock === 'bajo_stock') {
+        const stk = stockDe(p.id, movs);
+        const min = p.stockMinimo !== undefined ? p.stockMinimo : 3;
+        return stk <= min;
+      }
+      return (p.categoria || '').trim().toLowerCase() === filtroCategoriaStock.trim().toLowerCase();
+    });
+  }, [productos, movs, filtroCategoriaStock]);
+
+  const mermasHistoricas = useMemo(() => {
+    return movs
+      .filter((m) => m.tipo === 'merma')
+      .sort((a, b) => b.ts - a.ts);
+  }, [movs]);
   const deudoresFiltrados = useMemo(() => {
     const q = busquedaDeudor.trim().toLowerCase();
     if (!q) return deudoresList;
@@ -3836,31 +3987,71 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                       </button>
                     </div>
 
-                    {/* CHIPS RÁPIDOS DE PRODUCTOS FRECUENTES */}
+                    {/* CHIPS RÁPIDOS DE PRODUCTOS CON CATEGORÍAS */}
                     {productos.length > 0 && (
                       <div style={{ marginBottom: 12 }}>
-                        <div className="sub" style={{ fontSize: '0.74rem', marginBottom: 6, fontWeight: 600 }}>
-                          ⚡ Acceso rápido (toca para sumar +1 al carrito):
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
+                          <span className="sub" style={{ fontSize: '0.74rem', fontWeight: 600 }}>
+                            ⚡ Acceso rápido (+1 toque):
+                          </span>
+                          {categoriasDisponibles.length > 1 && (
+                            <div style={{ display: 'flex', gap: 4, overflowX: 'auto' }}>
+                              <button
+                                type="button"
+                                className={filtroCategoriaPos === 'todas' ? 'btn-primary' : 'btn-ghost'}
+                                style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 12 }}
+                                onClick={() => setFiltroCategoriaPos('todas')}
+                              >
+                                Todas
+                              </button>
+                              {categoriasDisponibles.map((cat) => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  className={filtroCategoriaPos === cat ? 'btn-primary' : 'btn-ghost'}
+                                  style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 12 }}
+                                  onClick={() => setFiltroCategoriaPos(cat)}
+                                >
+                                  {cat}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 85, overflowY: 'auto' }}>
-                          {productos.slice(0, 8).map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              className="btn-ghost"
-                              style={{
-                                fontSize: '0.74rem',
-                                padding: '3px 8px',
-                                borderRadius: 6,
-                                background: 'rgba(0,0,0,0.12)',
-                                border: '1px solid var(--border)',
-                                cursor: 'pointer',
-                              }}
-                              onClick={() => handleAddToCart(p.id, 1)}
-                            >
-                              +1 {p.nombre} ({fmt(p.precio || 0)})
-                            </button>
-                          ))}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 95, overflowY: 'auto' }}>
+                          {productos
+                            .filter((p) => filtroCategoriaPos === 'todas' || (p.categoria || '').trim().toLowerCase() === filtroCategoriaPos.trim().toLowerCase())
+                            .slice(0, 12)
+                            .map((p) => {
+                              const stk = stockDe(p.id, movs);
+                              return (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  className="btn-ghost"
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    padding: '3px 8px',
+                                    borderRadius: 6,
+                                    background: 'rgba(0,0,0,0.12)',
+                                    border: '1px solid var(--border)',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                  onClick={() => handleAddToCart(p.id, 1)}
+                                >
+                                  <span>+1 {p.nombre}</span>
+                                  <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{fmt(p.precio || 0)}</span>
+                                  {stk <= (p.stockMinimo !== undefined ? p.stockMinimo : 3) && (
+                                    <span style={{ fontSize: '0.66rem', fontWeight: 800, color: stk <= 0 ? '#ef4444' : '#f59e0b' }}>
+                                      ({stk <= 0 ? 'agotado' : stk})
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
                         </div>
                       </div>
                     )}
@@ -4870,6 +5061,132 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
             {/* VIEW STOCK */}
             {activeTab === 'stock' && (
               <section id="viewStock">
+                {/* BARRA SUPERIOR DE ACCIONES RÁPIDAS DE INVENTARIO */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setScannerOpen(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 14px',
+                      fontSize: '0.86rem',
+                      fontWeight: 700,
+                      background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
+                      boxShadow: '0 4px 14px rgba(37,99,235,0.3)',
+                    }}
+                  >
+                    <span>📷 Escanear con Cámara</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => handleOpenMerma()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 14px',
+                      fontSize: '0.86rem',
+                      fontWeight: 700,
+                      border: '1px solid rgba(234, 88, 12, 0.4)',
+                      color: '#ea580c',
+                      background: 'rgba(234, 88, 12, 0.08)',
+                    }}
+                  >
+                    <span>⚠️ Registrar Merma / Baja</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => setModalHistorialMermas(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 14px',
+                      fontSize: '0.86rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>📋 Historial de Bajas</span>
+                  </button>
+                </div>
+
+                {/* BANNER DE REABASTECIMIENTO URGENTE (SI HAY PRODUCTOS EN STOCK BAJO O AGOTADOS) */}
+                {productosBajoStock.length > 0 && (
+                  <div
+                    className="card"
+                    style={{
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      padding: '12px 14px',
+                      marginBottom: 12,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                      <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>🚨 Alerta de Reabastecimiento ({productosBajoStock.length})</span>
+                      </div>
+                      <span className="sub" style={{ fontSize: '0.76rem' }}>
+                        Productos agotados o con existencias menores al mínimo requerido
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6 }}>
+                      {productosBajoStock.map((it) => (
+                        <div
+                          key={it.producto.id}
+                          style={{
+                            background: 'var(--card)',
+                            border: `1px solid ${it.isAgotado ? 'rgba(239,68,68,0.45)' : 'rgba(245,158,11,0.45)'}`,
+                            borderRadius: 10,
+                            padding: '8px 12px',
+                            minWidth: 175,
+                            flex: '0 0 auto',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                            gap: 6,
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {it.producto.nombre}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 800,
+                                marginTop: 2,
+                                color: it.isAgotado ? '#ef4444' : '#f59e0b',
+                              }}
+                            >
+                              {it.isAgotado ? '🔴 Agotado (0 unid)' : `🟡 Stock Bajo (${it.stock} / mín ${it.stockMinimo})`}
+                            </div>
+                          </div>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="btn-green"
+                              style={{ padding: '4px 10px', fontSize: '0.76rem', fontWeight: 700, width: '100%', justifyContent: 'center' }}
+                              onClick={() => handleOpenEntrada(it.producto.id)}
+                            >
+                              + Reponer Stock
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* FORMULARIO AGREGAR PRODUCTO (SOLO ADMINS) */}
                 {isAdmin ? (
                   <div className="card" style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 14 }}>
@@ -4882,23 +5199,6 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                           Escanea con la cámara o ingresa el código de barra para autocompletar el nombre y evitar errores.
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={() => setScannerOpen(true)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          padding: '8px 14px',
-                          fontSize: '0.86rem',
-                          fontWeight: 700,
-                          background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
-                          boxShadow: '0 4px 14px rgba(37,99,235,0.3)',
-                        }}
-                      >
-                        <span>📷 Escanear con Cámara</span>
-                      </button>
                     </div>
 
                     {scannedFeedback && (
@@ -4977,6 +5277,28 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
 
                       <div>
                         <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Categoría:
+                        </label>
+                        <input
+                          placeholder="Ej: Bebidas Energéticas"
+                          list="listaCategoriasForm"
+                          value={pCategoria}
+                          onChange={(e) => setPCategoria(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                        <datalist id="listaCategoriasForm">
+                          <option value="Bebidas Energéticas" />
+                          <option value="Snacks y Barras" />
+                          <option value="Bebidas y Jugos" />
+                          <option value="Accesorios" />
+                          {categoriasDisponibles.map((c) => (
+                            <option key={c} value={c} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
                           Cantidad comprada / a sumar:
                         </label>
                         <input
@@ -5013,6 +5335,20 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                           style={{ fontSize: '0.86rem' }}
                         />
                       </div>
+
+                      <div>
+                        <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.78rem' }}>
+                          Stock mínimo de alerta:
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="3"
+                          min="1"
+                          value={pStockMinimo}
+                          onChange={(e) => setPStockMinimo(e.target.value)}
+                          style={{ fontSize: '0.86rem' }}
+                        />
+                      </div>
                     </div>
 
                     <div className="row" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
@@ -5046,22 +5382,110 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   </div>
                 )}
 
+                {/* FILTROS POR CATEGORÍA Y ESTADO */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    className={filtroCategoriaStock === 'todas' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '5px 12px', borderRadius: 20, fontWeight: 700 }}
+                    onClick={() => setFiltroCategoriaStock('todas')}
+                  >
+                    Todos ({productos.length})
+                  </button>
+                  {productosBajoStock.length > 0 && (
+                    <button
+                      type="button"
+                      className={filtroCategoriaStock === 'bajo_stock' ? 'btn-danger' : 'btn-ghost'}
+                      style={{
+                        fontSize: '0.78rem',
+                        padding: '5px 12px',
+                        borderRadius: 20,
+                        fontWeight: 700,
+                        color: filtroCategoriaStock === 'bajo_stock' ? '#fff' : '#ef4444',
+                        borderColor: 'rgba(239,68,68,0.4)',
+                      }}
+                      onClick={() => setFiltroCategoriaStock('bajo_stock')}
+                    >
+                      ⚠️ Alertas Stock ({productosBajoStock.length})
+                    </button>
+                  )}
+                  {categoriasDisponibles.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={filtroCategoriaStock === cat ? 'btn-primary' : 'btn-ghost'}
+                      style={{ fontSize: '0.78rem', padding: '5px 12px', borderRadius: 20, fontWeight: 700 }}
+                      onClick={() => setFiltroCategoriaStock(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="card" id="listaProductos">
                   <div style={{ fontWeight: 700, marginBottom: 10, fontSize: '0.92rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>Existencias en Stock ({productos.length})</span>
+                    <span>Existencias en Stock ({productosFiltradosStock.length})</span>
                     <span className="sub" style={{ fontSize: '0.78rem' }}>Inventario en tiempo real</span>
                   </div>
-                  {productos.length ? (
-                    productos.map((p) => {
+                  {productosFiltradosStock.length ? (
+                    productosFiltradosStock.map((p) => {
                       const s = stockDe(p.id, movs);
+                      const min = p.stockMinimo !== undefined ? p.stockMinimo : 3;
                       const cu = costoUnit(p.id, movs);
                       const inv = invertido(p.id, movs);
                       const gananciaUnit = (p.precio || 0) - cu;
                       return (
-                        <div className="item" key={p.id}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="item" key={p.id} style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 200 }}>
                             <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <span>{p.nombre}</span>
+                              <span style={{ fontWeight: 800 }}>{p.nombre}</span>
+
+                              {/* BADGE DE ESTADO DE STOCK */}
+                              <span
+                                style={{
+                                  fontSize: '0.70rem',
+                                  fontWeight: 800,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background:
+                                    s <= 0
+                                      ? 'rgba(239,68,68,0.18)'
+                                      : s <= min
+                                      ? 'rgba(245,158,11,0.18)'
+                                      : 'rgba(16,185,129,0.18)',
+                                  color:
+                                    s <= 0
+                                      ? '#ef4444'
+                                      : s <= min
+                                      ? '#f59e0b'
+                                      : '#10b981',
+                                  border: `1px solid ${
+                                    s <= 0
+                                      ? 'rgba(239,68,68,0.35)'
+                                      : s <= min
+                                      ? 'rgba(245,158,11,0.35)'
+                                      : 'rgba(16,185,129,0.35)'
+                                  }`,
+                                }}
+                              >
+                                {s <= 0 ? '🔴 Agotado' : s <= min ? `🟡 Bajo (${s}/${min})` : `🟢 Stock: ${s}`}
+                              </span>
+
+                              {p.categoria && (
+                                <span
+                                  style={{
+                                    fontSize: '0.68rem',
+                                    background: 'rgba(37,99,235,0.12)',
+                                    color: 'var(--accent)',
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  🏷 {p.categoria}
+                                </span>
+                              )}
+
                               {p.codigoBarra && (
                                 <span
                                   style={{
@@ -5073,19 +5497,18 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                                     color: 'var(--sub)',
                                   }}
                                 >
-                                  🏷 {p.codigoBarra}
+                                  🔖 {p.codigoBarra}
                                 </span>
                               )}
                             </div>
-                            <div className={`amount ${s <= 0 ? 'debt' : 'ok'}`} style={{ marginTop: 2 }}>
-                              Stock: {s} unid.
-                            </div>
+
                             {isAdmin && (
-                              <div className="sub" style={{ fontSize: '0.78rem' }}>
+                              <div className="sub" style={{ fontSize: '0.78rem', marginTop: 4 }}>
                                 Invertido: {fmt(inv)} · Costo unit.: {fmt(cu)}
                               </div>
                             )}
-                            <div className="sub" style={{ fontSize: '0.78rem' }}>
+
+                            <div className="sub" style={{ fontSize: '0.78rem', marginTop: 2 }}>
                               {p.precio ? (
                                 <>
                                   Venta: {fmt(p.precio)}
@@ -5103,7 +5526,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                               )}
                             </div>
                           </div>
-                          <div className="actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+
+                          <div className="actions" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                             <button
                               className="btn-red"
                               onClick={() => handleOpenVentaRapida(p.id)}
@@ -5111,6 +5535,15 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                               style={{ padding: '6px 12px', fontSize: '0.82rem' }}
                             >
                               Venta
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              onClick={() => handleOpenMerma(p.id)}
+                              title="Registrar merma, rotura o degustación"
+                              style={{ padding: '6px 10px', fontSize: '0.82rem', color: '#ea580c' }}
+                            >
+                              ⚠️ Merma
                             </button>
                             {isAdmin && (
                               <>
@@ -5137,7 +5570,11 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                       );
                     })
                   ) : (
-                    <div className="empty">Sin productos registrados</div>
+                    <div className="empty">
+                      {filtroCategoriaStock !== 'todas'
+                        ? 'No hay productos en la categoría o filtro seleccionado'
+                        : 'Sin productos registrados'}
+                    </div>
                   )}
                 </div>
               </section>
@@ -5176,6 +5613,22 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                     <span>Costo de lo vendido</span>
                     <span className="amount">{fmt(resumenPeriodo.costoV)}</span>
                   </div>
+                  {Boolean(resumenPeriodo.costoMerma && resumenPeriodo.costoMerma > 0) && (
+                    <div className="item" style={{ color: '#ea580c' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>⚠️ Pérdida por mermas/roturas ({resumenPeriodo.mermasCant} u.)</span>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ fontSize: '0.72rem', padding: '1px 6px' }}
+                          onClick={() => setModalHistorialMermas(true)}
+                        >
+                          Ver detalle
+                        </button>
+                      </span>
+                      <span className="amount debt">-{fmt(resumenPeriodo.costoMerma || 0)}</span>
+                    </div>
+                  )}
                   <div className="item">
                     <span>
                       <b>Ganancia del período</b>
@@ -5962,6 +6415,343 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                 }}
               >
                 ✓ Cerrar y Nueva Venta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REGISTRAR MERMA / BAJA DE INVENTARIO */}
+      {modalMerma.isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.68)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalMerma((prev) => ({ ...prev, isOpen: false }))}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 440,
+              width: '100%',
+              margin: 0,
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+              border: '1px solid rgba(234, 88, 12, 0.4)',
+              borderRadius: 16,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '1.4rem' }}>⚠️</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#ea580c' }}>
+                    Registrar Merma / Baja de Stock
+                  </div>
+                  <div className="sub" style={{ fontSize: '0.78rem' }}>
+                    Descuenta stock físico sin registrar ingreso ni deuda en caja
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalMerma((prev) => ({ ...prev, isOpen: false }))}
+                style={{ fontSize: '1.1rem', padding: '4px 8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* SELECCIONAR PRODUCTO */}
+            <div style={{ marginBottom: 10 }}>
+              <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.80rem' }}>
+                Producto afectado:
+              </label>
+              <select
+                value={modalMerma.producto?.id || ''}
+                onChange={(e) => {
+                  const sel = productos.find((p) => p.id === e.target.value) || null;
+                  setModalMerma((prev) => ({ ...prev, producto: sel, error: null }));
+                }}
+                style={{ fontSize: '0.88rem' }}
+              >
+                {productos.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre} (Stock actual: {stockDe(p.id, movs)})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* CANTIDAD A DAR DE BAJA */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label className="sub" style={{ fontWeight: 600, fontSize: '0.80rem' }}>
+                  Cantidad a dar de baja:
+                </label>
+                {modalMerma.producto && (
+                  <span className="sub" style={{ fontSize: '0.76rem' }}>
+                    Stock disponible: <b>{stockDe(modalMerma.producto.id, movs)}</b>
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ padding: '6px 12px', fontWeight: 800 }}
+                  onClick={() => {
+                    const c = Math.max(1, (parseInt(modalMerma.cant, 10) || 1) - 1);
+                    setModalMerma((prev) => ({ ...prev, cant: String(c), error: null }));
+                  }}
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="1"
+                  value={modalMerma.cant}
+                  onChange={(e) => setModalMerma((prev) => ({ ...prev, cant: e.target.value, error: null }))}
+                  style={{ textAlign: 'center', fontSize: '1.1rem', fontWeight: 800, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ padding: '6px 12px', fontWeight: 800 }}
+                  onClick={() => {
+                    const c = (parseInt(modalMerma.cant, 10) || 1) + 1;
+                    setModalMerma((prev) => ({ ...prev, cant: String(c), error: null }));
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* MOTIVO DE LA MERMA */}
+            <div style={{ marginBottom: 12 }}>
+              <label className="sub" style={{ display: 'block', marginBottom: 6, fontWeight: 600, fontSize: '0.80rem' }}>
+                Motivo de la merma:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                {[
+                  { id: 'rotura', label: '💥 Rotura / Daño' },
+                  { id: 'vencimiento', label: '⏳ Vencimiento' },
+                  { id: 'degustacion', label: '🥤 Degustación / Muestra' },
+                  { id: 'consumo_interno', label: '🧑‍💼 Consumo Interno' },
+                  { id: 'perdida', label: '❓ Pérdida / Extravío' },
+                  { id: 'otro', label: '📝 Otro motivo' },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={modalMerma.motivo === m.id ? 'btn-primary' : 'btn-ghost'}
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      padding: '8px 6px',
+                      borderRadius: 8,
+                      textAlign: 'left',
+                      background: modalMerma.motivo === m.id ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : undefined,
+                    }}
+                    onClick={() => setModalMerma((prev) => ({ ...prev, motivo: m.id as MotivoMerma }))}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* NOTA U OBSERVACIÓN */}
+            <div style={{ marginBottom: 14 }}>
+              <label className="sub" style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.80rem' }}>
+                Detalle u observación (opcional):
+              </label>
+              <input
+                placeholder="Ej: Lata aplastada en caja de transporte..."
+                value={modalMerma.nota}
+                onChange={(e) => setModalMerma((prev) => ({ ...prev, nota: e.target.value }))}
+                style={{ fontSize: '0.85rem' }}
+              />
+            </div>
+
+            {modalMerma.error && (
+              <div style={{ color: '#ef4444', fontSize: '0.82rem', marginBottom: 10, fontWeight: 600 }}>
+                ⚠️ {modalMerma.error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalMerma((prev) => ({ ...prev, isOpen: false }))}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleConfirmarMerma}
+                style={{
+                  background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                  fontWeight: 700,
+                  boxShadow: '0 4px 12px rgba(234, 88, 12, 0.35)',
+                }}
+              >
+                ✓ Confirmar Baja de Stock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL HISTORIAL DE MERMAS Y BAJAS */}
+      {modalHistorialMermas && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+          onClick={() => setModalHistorialMermas(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 520,
+              width: '100%',
+              margin: 0,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
+              border: '1px solid rgba(234, 88, 12, 0.35)',
+              borderRadius: 16,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '1.4rem' }}>📋</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>Historial de Mermas y Bajas</div>
+                  <div className="sub" style={{ fontSize: '0.78rem' }}>
+                    Registro de roturas, vencimientos y degustaciones
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setModalHistorialMermas(false)}
+                style={{ fontSize: '1.1rem', padding: '4px 8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* RESUMEN TOTAL DE MERMAS */}
+            {(() => {
+              const totalUnid = mermasHistoricas.reduce((s, m) => s + (m.cant || 0), 0);
+              return (
+                <div
+                  style={{
+                    background: 'rgba(234, 88, 12, 0.08)',
+                    border: '1px solid rgba(234, 88, 12, 0.25)',
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    marginBottom: 12,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Total de unidades dadas de baja:</span>
+                  <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#ea580c' }}>
+                    {totalUnid} unid. ({mermasHistoricas.length} registros)
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* LISTA DE MERMAS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
+              {mermasHistoricas.length === 0 ? (
+                <div className="empty">No hay registros de mermas o bajas en el historial</div>
+              ) : (
+                mermasHistoricas.map((m, idx) => {
+                  const motivoLabels: Record<string, string> = {
+                    rotura: '💥 Rotura',
+                    vencimiento: '⏳ Vencimiento',
+                    degustacion: '🥤 Muestra/Degustación',
+                    consumo_interno: '🧑‍💼 Consumo Interno',
+                    perdida: '❓ Pérdida',
+                    otro: '📝 Otro',
+                  };
+                  return (
+                    <div
+                      key={m.id || idx}
+                      style={{
+                        background: 'var(--bg)',
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>
+                          {m.cant}x {m.producto || 'Producto'}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.70rem',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            background: 'rgba(234, 88, 12, 0.15)',
+                            color: '#ea580c',
+                            border: '1px solid rgba(234, 88, 12, 0.3)',
+                          }}
+                        >
+                          {motivoLabels[m.motivoMerma || 'rotura'] || '⚠️ Merma'}
+                        </span>
+                      </div>
+                      <div className="sub" style={{ fontSize: '0.76rem', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{m.fecha || fTs(m.ts)} {m.por ? `· Por ${m.por}` : ''}</span>
+                      </div>
+                      {m.nota && (
+                        <div style={{ fontSize: '0.78rem', marginTop: 4, fontStyle: 'italic', color: 'var(--sub)' }}>
+                          "{m.nota}"
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setModalHistorialMermas(false)}
+                style={{ padding: '8px 16px', fontSize: '0.88rem' }}
+              >
+                Cerrar
               </button>
             </div>
           </div>

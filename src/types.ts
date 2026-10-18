@@ -3,9 +3,19 @@ export interface Producto {
   nombre: string;
   precio?: number;
   codigoBarra?: string;
+  stockMinimo?: number;
+  categoria?: string;
 }
 
-export type TipoMovimiento = 'entrada' | 'venta' | 'deuda' | 'pago';
+export type TipoMovimiento = 'entrada' | 'venta' | 'deuda' | 'pago' | 'merma';
+
+export type MotivoMerma =
+  | 'rotura'
+  | 'vencimiento'
+  | 'degustacion'
+  | 'consumo_interno'
+  | 'perdida'
+  | 'otro';
 
 export type MedioPago = 'efectivo' | 'transferencia' | 'debito' | 'fiado' | 'mixto';
 
@@ -53,6 +63,7 @@ export interface Movimiento {
   pagoCon?: number;
   vuelto?: number;
   telefono?: string;
+  motivoMerma?: MotivoMerma;
 }
 
 export interface CierreCaja {
@@ -106,6 +117,8 @@ export interface ResumenPeriodo {
   ganancia: number;
   ventas: number;
   porP: Record<string, { inv: number; vend: number; costo: number }>;
+  costoMerma?: number;
+  mermasCant?: number;
 }
 
 export type FiltroPeriodo = 'dia' | 'semana' | 'mes' | 'personalizado';
