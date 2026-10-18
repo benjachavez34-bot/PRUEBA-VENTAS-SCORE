@@ -85,7 +85,7 @@ function responderDudaApp(pregunta: string, isAdmin: boolean): RespuestaIA {
         '3. **Medios de Pago**: Elige entre Efectivo, Transferencia, Débito / Tarjetas POS o Fiado.\n' +
         '4. **Calculadora de Vuelto**: Si el cliente paga en efectivo, el sistema te muestra botones rápidos de billetes chilenos ($20.000, $10.000, $5.000, etc.) o puedes ingresar el monto recibido. Te calculará el vuelto exacto al instante.\n' +
         '5. **Ticket Digital**: Tras confirmar, puedes enviar el ticket detallado de la compra directamente al WhatsApp del cliente.',
-      accion: { label: 'Ir al Punto de Venta (POS)', tab: 'pos', icon: '🛒' },
+      accion: { label: 'Ir al Punto de Venta (POS)', tab: 'venta', icon: '🛒' },
     };
   }
 
@@ -108,7 +108,7 @@ function responderDudaApp(pregunta: string, isAdmin: boolean): RespuestaIA {
         '• 💳 **Débito / POS**: Para cobros con máquina de tarjetas (Transbank, Getnet, SumUp, etc.).\n' +
         '• 🏷️ **Fiado (Crédito)**: Suma la deuda a la cuenta corriente del cliente en la pestaña Deudores.\n\n' +
         '💡 Todos los medios de pago se separan y concilian automáticamente en el **Cierre de Caja** y en las **Estadísticas de Negocio**.',
-      accion: { label: 'Ir a Ventas', tab: 'pos', icon: '💳' },
+      accion: { label: 'Ir a Ventas', tab: 'venta', icon: '💳' },
     };
   }
 
@@ -301,7 +301,7 @@ function responderDudaApp(pregunta: string, isAdmin: boolean): RespuestaIA {
         '   3. Servicio al Cliente.\n' +
         '   4. Cuadratura de Stock y Arqueo.\n' +
         '• **Puntaje Ponderado**: Calcula automáticamente la calificación general oficial del vendedor con notas del supervisor.',
-      accion: { label: 'Ir a Supervisión', tab: 'vendedores', icon: '⭐' },
+      accion: { label: 'Ir a Supervisión', tab: 'equipo', icon: '⭐' },
     };
   }
 

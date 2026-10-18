@@ -5976,7 +5976,11 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                 <AyudaView
                   userName={perfil.nombre || miNombre}
                   isAdmin={isAdmin}
-                  onNavigateTab={(tab) => setActiveTab(tab as any)}
+                  onNavigateTab={(tab) => {
+                    if (tab === 'pos' || tab === 'ventas') setActiveTab('venta');
+                    else if (tab === 'vendedores') setActiveTab('equipo');
+                    else setActiveTab(tab as any);
+                  }}
                 />
               </section>
             )}
