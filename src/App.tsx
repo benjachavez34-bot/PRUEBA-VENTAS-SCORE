@@ -66,6 +66,7 @@ import { ModalDetalleCierre } from './components/ModalDetalleCierre';
 import { ModalMenuAdmin } from './components/ModalMenuAdmin';
 import { ModalNuevoProducto } from './components/ModalNuevoProducto';
 import { ModalNuevaDeuda } from './components/ModalNuevaDeuda';
+import { ModalCheckoutPOS } from './components/ModalCheckoutPOS';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
 import {
   initializePushNotifications,
@@ -468,10 +469,12 @@ export default function App() {
     cierre: CierreCaja | null;
   }>({ isOpen: false, cierre: null });
 
-  // Modales de Simplificación y Desaturación (Fase A)
+  // Modales de Simplificación y Desaturación (Fase A y B)
   const [modalMenuAdminOpen, setModalMenuAdminOpen] = useState<boolean>(false);
   const [modalNuevoProductoOpen, setModalNuevoProductoOpen] = useState<boolean>(false);
   const [modalNuevaDeudaOpen, setModalNuevaDeudaOpen] = useState<boolean>(false);
+  const [modalCheckoutOpen, setModalCheckoutOpen] = useState<boolean>(false);
+  const [busquedaPos, setBusquedaPos] = useState<string>('');
 
   // Modal Entrada de Mercadería
   const [modalEntrada, setModalEntrada] = useState<{
@@ -1905,6 +1908,7 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
 
     handleClearCart();
     setModalTicket(ticketObj);
+    setModalCheckoutOpen(false);
     showToast(`✓ Venta de ${fmt(total)} registrada con éxito`);
   };
 
@@ -2688,6 +2692,26 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       return (p.categoria || '').trim().toLowerCase() === filtroCategoriaStock.trim().toLowerCase();
     });
   }, [productos, movs, filtroCategoriaStock]);
+
+  // Catálogo de Productos Filtrados para el Punto de Venta (Fase B)
+  const productosFiltradosPos = useMemo(() => {
+    return productos.filter((p) => {
+      if (
+        filtroCategoriaPos !== 'todas' &&
+        (p.categoria || '').trim().toLowerCase() !== filtroCategoriaPos.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      if (busquedaPos.trim()) {
+        const q = busquedaPos.trim().toLowerCase();
+        const n = (p.nombre || '').toLowerCase();
+        const cb = (p.codigoBarra || '').toLowerCase();
+        const cat = (p.categoria || '').toLowerCase();
+        if (!n.includes(q) && !cb.includes(q) && !cat.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [productos, filtroCategoriaPos, busquedaPos]);
 
   const mermasHistoricas = useMemo(() => {
     return movs
@@ -3973,592 +3997,252 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
             {/* VIEW VENTA */}
             {activeTab === 'venta' && (
               <section id="viewVenta">
-                {/* SELECTOR DE MODO POS: CARRITO MULTIPRODUCTO VS VENTA RÁPIDA */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-                  <button
-                    type="button"
-                    className={posMode === 'carrito' ? 'btn-primary' : 'btn-ghost'}
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      fontSize: '0.88rem',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                    }}
-                    onClick={() => setPosMode('carrito')}
-                  >
-                    <span>🛒 Carrito POS Multiproducto</span>
-                    {cart.length > 0 && (
-                      <span
-                        style={{
-                          background: '#fff',
-                          color: 'var(--accent)',
-                          padding: '1px 7px',
-                          borderRadius: 12,
-                          fontSize: '0.75rem',
-                          fontWeight: 800,
-                        }}
-                      >
-                        {cart.reduce((s, it) => s + it.cant, 0)}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className={posMode === 'rapida' ? 'btn-primary' : 'btn-ghost'}
-                    style={{
-                      flex: 1,
-                      padding: '8px 12px',
-                      fontSize: '0.88rem',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 6,
-                    }}
-                    onClick={() => setPosMode('rapida')}
-                  >
-                    <span>⚡ Venta Rápida (1 Producto)</span>
-                  </button>
-                </div>
-
-                {/* ==================== MODO 1: CARRITO POS MULTIPRODUCTO ==================== */}
-                {posMode === 'carrito' && (
-                  <div className="card" style={{ border: '1px solid rgba(37,99,235,0.25)', borderRadius: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                      <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>🛒 Punto de Venta (POS)</span>
-                      </div>
+                {/* BARRA SUPERIOR DE ACCIONES POS: BUSCADOR & ESCÁNER */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      placeholder="🔍 Buscar energéticas, bebidas o código..."
+                      value={busquedaPos}
+                      onChange={(e) => setBusquedaPos(e.target.value)}
+                      style={{
+                        paddingLeft: 12,
+                        fontSize: '0.90rem',
+                        borderRadius: 12,
+                      }}
+                    />
+                    {busquedaPos && (
                       <button
                         type="button"
-                        className="btn-primary"
-                        onClick={() => setScannerPosOpen(true)}
+                        onClick={() => setBusquedaPos('')}
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          padding: '6px 12px',
-                          fontSize: '0.84rem',
-                          fontWeight: 700,
-                          background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
-                        }}
-                      >
-                        <span>📷 Escanear con Cámara</span>
-                      </button>
-                    </div>
-
-                    {/* SELECTOR RÁPIDO PARA AGREGAR AL CARRITO */}
-                    <div className="row" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) 90px auto', gap: 8, marginBottom: 8 }}>
-                      <select
-                        value={posProductoId}
-                        onChange={(e) => setPosProductoId(e.target.value)}
-                        style={{ fontSize: '0.86rem' }}
-                      >
-                        <option value="">-- Elige un producto para agregar --</option>
-                        {productos.map((p) => {
-                          const stk = stockDe(p.id, movs);
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.nombre} ({fmt(p.precio || 0)} · stock: {stk})
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="Cant"
-                        value={posCantidad}
-                        onChange={(e) => setPosCantidad(e.target.value)}
-                        style={{ fontSize: '0.86rem', textAlign: 'center' }}
-                      />
-                      <button
-                        type="button"
-                        className="btn-green"
-                        style={{ padding: '8px 14px', fontSize: '0.85rem', fontWeight: 700 }}
-                        onClick={() => {
-                          if (!posProductoId) return alert('Selecciona un producto primero');
-                          const c = parseInt(posCantidad, 10) || 1;
-                          handleAddToCart(posProductoId, c);
-                          setPosProductoId('');
-                          setPosCantidad('1');
-                        }}
-                      >
-                        + Agregar
-                      </button>
-                    </div>
-
-                    {/* CHIPS RÁPIDOS DE PRODUCTOS CON CATEGORÍAS */}
-                    {productos.length > 0 && (
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 4 }}>
-                          <span className="sub" style={{ fontSize: '0.74rem', fontWeight: 600 }}>
-                            ⚡ Acceso rápido (+1 toque):
-                          </span>
-                          {categoriasDisponibles.length > 1 && (
-                            <div style={{ display: 'flex', gap: 4, overflowX: 'auto' }}>
-                              <button
-                                type="button"
-                                className={filtroCategoriaPos === 'todas' ? 'btn-primary' : 'btn-ghost'}
-                                style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 12 }}
-                                onClick={() => setFiltroCategoriaPos('todas')}
-                              >
-                                Todas
-                              </button>
-                              {categoriasDisponibles.map((cat) => (
-                                <button
-                                  key={cat}
-                                  type="button"
-                                  className={filtroCategoriaPos === cat ? 'btn-primary' : 'btn-ghost'}
-                                  style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 12 }}
-                                  onClick={() => setFiltroCategoriaPos(cat)}
-                                >
-                                  {cat}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', maxHeight: 95, overflowY: 'auto' }}>
-                          {productos
-                            .filter((p) => filtroCategoriaPos === 'todas' || (p.categoria || '').trim().toLowerCase() === filtroCategoriaPos.trim().toLowerCase())
-                            .slice(0, 12)
-                            .map((p) => {
-                              const stk = stockDe(p.id, movs);
-                              return (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  className="btn-ghost"
-                                  style={{
-                                    fontSize: '0.74rem',
-                                    padding: '3px 8px',
-                                    borderRadius: 6,
-                                    background: 'rgba(0,0,0,0.12)',
-                                    border: '1px solid var(--border)',
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                  }}
-                                  onClick={() => handleAddToCart(p.id, 1)}
-                                >
-                                  <span>+1 {p.nombre}</span>
-                                  <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{fmt(p.precio || 0)}</span>
-                                  {stk <= (p.stockMinimo !== undefined ? p.stockMinimo : 3) && (
-                                    <span style={{ fontSize: '0.66rem', fontWeight: 800, color: stk <= 0 ? '#ef4444' : '#f59e0b' }}>
-                                      ({stk <= 0 ? 'agotado' : stk})
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* LISTADO DE ITEMS EN EL CARRITO */}
-                    <div style={{ background: 'var(--bg)', borderRadius: 10, padding: '10px 12px', border: '1px solid var(--border)', marginBottom: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                          📦 Productos en este pedido ({cart.length})
-                        </span>
-                        {cart.length > 0 && (
-                          <button
-                            type="button"
-                            className="btn-ghost"
-                            style={{ fontSize: '0.74rem', padding: '2px 8px', color: 'var(--accent2)' }}
-                            onClick={handleClearCart}
-                          >
-                            Vaciar carrito
-                          </button>
-                        )}
-                      </div>
-
-                      {cart.length === 0 ? (
-                        <div className="sub" style={{ textAlign: 'center', padding: '16px 0', fontStyle: 'italic', fontSize: '0.84rem' }}>
-                          🛒 El carrito está vacío. Elige productos arriba o escanea con la cámara.
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {cart.map((it) => (
-                            <div
-                              key={it.producto.id}
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                paddingBottom: 6,
-                                borderBottom: '1px dashed var(--border)',
-                                gap: 6,
-                              }}
-                            >
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>{it.producto.nombre}</div>
-                                <div className="sub" style={{ fontSize: '0.75rem' }}>
-                                  {fmt(it.precioUnit)} c/u
-                                </div>
-                              </div>
-
-                              {/* CONTROLES DE CANTIDAD */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <button
-                                  type="button"
-                                  className="btn-ghost"
-                                  style={{ padding: '2px 8px', fontSize: '0.85rem', fontWeight: 800 }}
-                                  onClick={() => handleUpdateCartCant(it.producto.id, it.cant - 1)}
-                                >
-                                  -
-                                </button>
-                                <span style={{ fontWeight: 800, minWidth: 24, textAlign: 'center', fontSize: '0.90rem' }}>
-                                  {it.cant}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="btn-ghost"
-                                  style={{ padding: '2px 8px', fontSize: '0.85rem', fontWeight: 800 }}
-                                  onClick={() => handleAddToCart(it.producto.id, 1)}
-                                >
-                                  +
-                                </button>
-                              </div>
-
-                              <div style={{ minWidth: 65, textAlign: 'right', fontWeight: 700, fontSize: '0.92rem' }}>
-                                {fmt(it.subtotal)}
-                              </div>
-
-                              <button
-                                type="button"
-                                className="btn-ghost"
-                                style={{ padding: '2px 6px', fontSize: '0.80rem', color: 'var(--muted)' }}
-                                onClick={() => handleRemoveFromCart(it.producto.id)}
-                                title="Quitar producto"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* MEDIOS DE PAGO, DESCUENTO Y COBRO (ACTIVO CUANDO HAY PRODUCTOS) */}
-                    {cart.length > 0 && (() => {
-                      const subtotal = cart.reduce((s, it) => s + it.subtotal, 0);
-                      const desc = Math.max(0, parseFloat(posDescuento) || 0);
-                      const total = Math.max(0, subtotal - desc);
-                      const parsedPago = parseFloat(posPagoCon);
-                      const pagoConVal = isNaN(parsedPago) ? total : parsedPago;
-                      const vueltoVal = Math.max(0, pagoConVal - total);
-
-                      return (
-                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                          {/* SUBTOTOTAL, DESCUENTO Y TOTAL */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                            <span className="sub">Subtotal productos:</span>
-                            <span style={{ fontWeight: 700 }}>{fmt(subtotal)}</span>
-                          </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 10 }}>
-                            <span className="sub">Descuento o promo $:</span>
-                            <input
-                              type="number"
-                              placeholder="0"
-                              value={posDescuento}
-                              onChange={(e) => setPosDescuento(e.target.value)}
-                              style={{ width: 110, fontSize: '0.86rem', textAlign: 'right' }}
-                            />
-                          </div>
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              padding: '10px 14px',
-                              background: 'rgba(37,99,235,0.12)',
-                              border: '1px solid rgba(37,99,235,0.3)',
-                              borderRadius: 10,
-                              marginBottom: 12,
-                            }}
-                          >
-                            <span style={{ fontWeight: 800, fontSize: '1rem' }}>TOTAL A COBRAR:</span>
-                            <span style={{ fontWeight: 900, fontSize: '1.45rem', color: 'var(--accent)' }}>
-                              {fmt(total)}
-                            </span>
-                          </div>
-
-                          {/* SELECCIÓN DE MEDIO DE PAGO */}
-                          <div style={{ marginBottom: 12 }}>
-                            <label className="sub" style={{ display: 'block', fontWeight: 600, fontSize: '0.78rem', marginBottom: 6 }}>
-                              💳 Medio de Pago:
-                            </label>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 6 }}>
-                              {[
-                                { id: 'efectivo', label: '💵 Efectivo' },
-                                { id: 'transferencia', label: '📱 Transf.' },
-                                { id: 'debito', label: '💳 Débito' },
-                                { id: 'fiado', label: '⏳ Fiado' },
-                                { id: 'mixto', label: '🔀 Mixto' },
-                              ].map((mp) => (
-                                <button
-                                  key={mp.id}
-                                  type="button"
-                                  className={posMedioPago === mp.id ? 'btn-primary' : 'btn-ghost'}
-                                  style={{
-                                    fontSize: '0.80rem',
-                                    fontWeight: 700,
-                                    padding: '7px 4px',
-                                    borderRadius: 6,
-                                  }}
-                                  onClick={() => setPosMedioPago(mp.id as MedioPago)}
-                                >
-                                  {mp.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* CALCULADORA DE VUELTO (PARA EFECTIVO O MIXTO) */}
-                          {(posMedioPago === 'efectivo' || posMedioPago === 'mixto') && (
-                            <div
-                              style={{
-                                background: 'rgba(0,0,0,0.15)',
-                                padding: '10px 12px',
-                                borderRadius: 10,
-                                border: '1px solid var(--border)',
-                                marginBottom: 12,
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <span style={{ fontWeight: 700, fontSize: '0.84rem' }}>
-                                  🧮 ¿Con cuánto paga el cliente?
-                                </span>
-                                {pagoConVal >= total ? (
-                                  <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#16a34a' }}>
-                                    Vuelto: {fmt(vueltoVal)}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#dc2626' }}>
-                                    Falta: {fmt(total - pagoConVal)}
-                                  </span>
-                                )}
-                              </div>
-
-                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                                <input
-                                  type="number"
-                                  placeholder={String(total)}
-                                  value={posPagoCon}
-                                  onChange={(e) => setPosPagoCon(e.target.value)}
-                                  style={{ fontSize: '1.1rem', fontWeight: 800, flex: 1 }}
-                                />
-                              </div>
-
-                              {/* BOTONES RÁPIDOS DE BILLETES */}
-                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                {[
-                                  { label: 'Exacto', val: total },
-                                  { label: '$2.000', val: 2000 },
-                                  { label: '$5.000', val: 5000 },
-                                  { label: '$10.000', val: 10000 },
-                                  { label: '$20.000', val: 20000 },
-                                ].map((b, i) => (
-                                  <button
-                                    key={i}
-                                    type="button"
-                                    className="btn-ghost"
-                                    style={{
-                                      fontSize: '0.74rem',
-                                      padding: '3px 8px',
-                                      borderRadius: 4,
-                                      background: 'rgba(0,0,0,0.10)',
-                                    }}
-                                    onClick={() => setPosPagoCon(String(b.val))}
-                                  >
-                                    {b.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* DATOS DE CLIENTE & WHATSAPP (OBLIGATORIO EN FIADO, OPCIONAL EN OTRAS) */}
-                          <div style={{ marginBottom: 12 }}>
-                            <div className="sub" style={{ fontSize: '0.78rem', marginBottom: 4, fontWeight: 600 }}>
-                              {posMedioPago === 'fiado' ? '👤 Cliente Fiado (Obligatorio):' : '👤 Cliente (Opcional para enviar ticket):'}
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                              <div>
-                                <input
-                                  placeholder="Nombre cliente"
-                                  list="listaClientes"
-                                  value={posCliente}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setPosCliente(val);
-                                    const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                                    if (clientes[k]?.telefono && (!posTelefono || posTelefono === '+56 9 ')) {
-                                      setPosTelefono(clientes[k].telefono || '');
-                                    }
-                                  }}
-                                  style={{ fontSize: '0.85rem' }}
-                                />
-                                <datalist id="listaClientes">
-                                  {clientNames.map((name) => (
-                                    <option key={name} value={name} />
-                                  ))}
-                                </datalist>
-                              </div>
-                              <div>
-                                <input
-                                  type="tel"
-                                  placeholder="WhatsApp (+56 9...)"
-                                  value={posTelefono}
-                                  onChange={(e) => setPosTelefono(e.target.value)}
-                                  style={{ fontSize: '0.85rem' }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* BOTÓN COBRAR Y FINALIZAR VENTA */}
-                          <div className="row">
-                            <button
-                              type="button"
-                              className="btn-primary"
-                              onClick={handleCobrarCarrito}
-                              style={{
-                                width: '100%',
-                                padding: '12px 18px',
-                                fontSize: '1.05rem',
-                                fontWeight: 800,
-                                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                                boxShadow: '0 4px 14px rgba(22,163,74,0.35)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: 8,
-                              }}
-                            >
-                              <span>⚡ Cobrar {fmt(total)}</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* ==================== MODO 2: VENTA RÁPIDA (1 PRODUCTO TRADICIONAL) ==================== */}
-                {posMode === 'rapida' && (
-                  <div className="card">
-                    <div className="sub" style={{ fontWeight: 700, marginBottom: 8 }}>
-                      ⚡ Venta Rápida Tradicional (1 Producto a la vez):
-                    </div>
-                    <div className="row">
-                      <select
-                        value={vProductoId}
-                        onChange={(e) => handleVProductoChange(e.target.value)}
-                      >
-                        <option value="">
-                          {productos.length
-                            ? '-- Selecciona un producto --'
-                            : '-- Agrega productos en la pestaña Stock --'}
-                        </option>
-                        {productos.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.nombre} (stock: {stockDe(p.id, movs)})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="row">
-                      <input
-                        type="number"
-                        placeholder="Cantidad"
-                        value={vCantidad}
-                        onChange={(e) => handleVCantidadChange(e.target.value)}
-                      />
-                      <input
-                        type="number"
-                        placeholder="Precio unit."
-                        value={vPrecio}
-                        onChange={(e) => handleVPrecioChange(e.target.value)}
-                      />
-                    </div>
-                    <div className="row">
-                      <input
-                        type="number"
-                        placeholder="Total $"
-                        value={vTotal}
-                        onChange={(e) => setVTotal(e.target.value)}
-                      />
-                    </div>
-                    <div className="row">
-                      <label
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          flex: 1,
+                          position: 'absolute',
+                          right: 10,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--muted)',
+                          fontSize: '0.9rem',
                           cursor: 'pointer',
                         }}
                       >
-                        <input
-                          type="checkbox"
-                          checked={vFiado}
-                          onChange={(e) => setVFiado(e.target.checked)}
-                          style={{ flex: 'none', width: 'auto' }}
-                        />
-                        ¿Es fiado (queda debiendo)?
-                      </label>
-                    </div>
-                    {vFiado && (
-                      <div className="row" id="filaCliente" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                        <div>
-                          <input
-                            placeholder="Nombre del cliente fiado"
-                            list="listaClientes"
-                            value={vCliente}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setVCliente(val);
-                              const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                              if (clientes[k]?.telefono && (!vTelefono || vTelefono === '+56 9 ')) {
-                                setVTelefono(clientes[k].telefono || '');
-                              }
-                            }}
-                          />
-                          <datalist id="listaClientes">
-                            {clientNames.map((name) => (
-                              <option key={name} value={name} />
-                            ))}
-                          </datalist>
-                        </div>
-                        <div>
-                          <input
-                            type="tel"
-                            placeholder="WhatsApp (+56 9...)"
-                            value={vTelefono}
-                            onChange={(e) => setVTelefono(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    <div className="row">
-                      <button className="btn-primary" onClick={handleRegistrarVenta}>
-                        Registrar venta
+                        ✕
                       </button>
-                    </div>
-                    {selectedVProd && (
-                      <div className="sub" style={{ marginTop: 6 }}>
-                        Stock disponible: {stockDe(selectedVProd.id, movs)}
-                      </div>
                     )}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setScannerPosOpen(true)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '10px 14px',
+                      fontSize: '0.86rem',
+                      fontWeight: 800,
+                      background: 'linear-gradient(135deg, var(--accent) 0%, #1d4ed8 100%)',
+                      boxShadow: '0 4px 12px rgba(37,99,235,0.3)',
+                      borderRadius: 12,
+                      flexShrink: 0,
+                    }}
+                    title="Escanear producto con la cámara"
+                  >
+                    <span>📷 Escanear</span>
+                  </button>
+                </div>
+
+                {/* PILLS DE CATEGORÍAS */}
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6, marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    className={filtroCategoriaPos === 'todas' ? 'btn-primary' : 'btn-ghost'}
+                    style={{ fontSize: '0.78rem', padding: '5px 12px', borderRadius: 20, fontWeight: 700, flexShrink: 0 }}
+                    onClick={() => setFiltroCategoriaPos('todas')}
+                  >
+                    Todas ({productos.length})
+                  </button>
+                  {categoriasDisponibles.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      className={filtroCategoriaPos === cat ? 'btn-primary' : 'btn-ghost'}
+                      style={{ fontSize: '0.78rem', padding: '5px 12px', borderRadius: 20, fontWeight: 700, flexShrink: 0 }}
+                      onClick={() => setFiltroCategoriaPos(cat)}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* GRILLA / CATÁLOGO DE PRODUCTOS (FASE B) */}
+                <div className="pos-grid">
+                  {productosFiltradosPos.length > 0 ? (
+                    productosFiltradosPos.map((p) => {
+                      const stk = stockDe(p.id, movs);
+                      const min = p.stockMinimo !== undefined ? p.stockMinimo : 3;
+                      const itemInCart = cart.find((it) => it.producto.id === p.id);
+                      const isAgotado = stk <= 0;
+                      const isBajo = stk > 0 && stk <= min;
+
+                      return (
+                        <div
+                          key={p.id}
+                          className={`pos-card ${itemInCart ? 'in-cart' : ''}`}
+                        >
+                          <div>
+                            <div className="pos-card-category">{p.categoria || 'Energéticas'}</div>
+                            <div className="pos-card-name" title={p.nombre}>
+                              {p.nombre}
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                              <span className="pos-card-price">{fmt(p.precio || 0)}</span>
+                              <span
+                                className={`pos-card-stock ${
+                                  isAgotado ? 'danger' : isBajo ? 'warn' : 'ok'
+                                }`}
+                              >
+                                {isAgotado ? '🔴 Agotado' : isBajo ? `🟡 ${stk} u.` : `🟢 ${stk} u.`}
+                              </span>
+                            </div>
+
+                            {/* CONTROLES DE CARRITO DIRECTOS EN LA TARJETA */}
+                            <div style={{ marginTop: 8 }}>
+                              {itemInCart ? (
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    background: 'var(--accent)',
+                                    color: '#fff',
+                                    borderRadius: 8,
+                                    padding: '2px 4px',
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateCartCant(p.id, itemInCart.cant - 1)}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#fff',
+                                      fontWeight: 900,
+                                      fontSize: '1rem',
+                                      cursor: 'pointer',
+                                      padding: '2px 8px',
+                                    }}
+                                  >
+                                    -
+                                  </button>
+                                  <span style={{ fontWeight: 800, fontSize: '0.92rem' }}>
+                                    {itemInCart.cant} en pedido
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddToCart(p.id, 1)}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#fff',
+                                      fontWeight: 900,
+                                      fontSize: '1rem',
+                                      cursor: 'pointer',
+                                      padding: '2px 8px',
+                                    }}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn-primary"
+                                  onClick={() => handleAddToCart(p.id, 1)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 8px',
+                                    fontSize: '0.80rem',
+                                    fontWeight: 700,
+                                    borderRadius: 8,
+                                    background: isAgotado ? 'rgba(239,68,68,0.2)' : undefined,
+                                    color: isAgotado ? '#ef4444' : undefined,
+                                    border: isAgotado ? '1px solid rgba(239,68,68,0.3)' : undefined,
+                                  }}
+                                >
+                                  + Agregar
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div
+                      className="card"
+                      style={{
+                        gridColumn: '1 / -1',
+                        textAlign: 'center',
+                        padding: '24px 16px',
+                        color: 'var(--muted)',
+                      }}
+                    >
+                      <span>🔍 No se encontraron productos coincidentes</span>
+                      {busquedaPos && (
+                        <div style={{ marginTop: 8 }}>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => setBusquedaPos('')}
+                            style={{ fontSize: '0.80rem' }}
+                          >
+                            Limpiar búsqueda
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* BARRA FLOTANTE DE CARRITO (FASE B) */}
+                {cart.length > 0 && (
+                  <div
+                    className="pos-floating-bar"
+                    onClick={() => setModalCheckoutOpen(true)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: '1.4rem' }}>🛒</span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '0.94rem' }}>
+                          {cart.reduce((s, it) => s + it.cant, 0)}{' '}
+                          {cart.reduce((s, it) => s + it.cant, 0) === 1 ? 'producto' : 'productos'}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', opacity: 0.9 }}>
+                          Total: <b>{fmt(cart.reduce((s, it) => s + it.subtotal, 0))}</b>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      style={{
+                        background: '#fff',
+                        color: '#1d4ed8',
+                        border: 'none',
+                        borderRadius: 10,
+                        padding: '8px 16px',
+                        fontWeight: 900,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                      }}
+                    >
+                      Revisar & Cobrar ⚡
+                    </button>
                   </div>
                 )}
 
@@ -7753,6 +7437,29 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         handleCantidadChange={handleDCantidadChange}
         handlePrecioChange={handleDPrecioChange}
         clientes={clientes}
+      />
+
+      {/* MODAL CHECKOUT DESLIZABLE POS (FASE B) */}
+      <ModalCheckoutPOS
+        isOpen={modalCheckoutOpen}
+        onClose={() => setModalCheckoutOpen(false)}
+        cart={cart}
+        onUpdateCartCant={handleUpdateCartCant}
+        onRemoveFromCart={handleRemoveFromCart}
+        onClearCart={handleClearCart}
+        posDescuento={posDescuento}
+        setPosDescuento={setPosDescuento}
+        posMedioPago={posMedioPago}
+        setPosMedioPago={setPosMedioPago}
+        posPagoCon={posPagoCon}
+        setPosPagoCon={setPosPagoCon}
+        posCliente={posCliente}
+        setPosCliente={setPosCliente}
+        posTelefono={posTelefono}
+        setPosTelefono={setPosTelefono}
+        clientNames={clientNames}
+        clientes={clientes}
+        onCobrar={handleCobrarCarrito}
       />
     </>
   );
