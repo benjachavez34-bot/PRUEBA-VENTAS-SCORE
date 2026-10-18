@@ -75,13 +75,30 @@ export function exportExcel(
       Cierre: c.nombre,
       Desde: c.desdeTxt,
       Hasta: c.hastaTxt,
-      Compras: c.inv,
+      Responsable: c.por || 'N/A',
       Ventas: c.vend,
       Ingresado: c.ingresado,
+      'Efectivo Esperado': c.efectivoEsperado ?? 'N/A',
+      'Efectivo Real': c.efectivoReal ?? 'N/A',
+      'Transferencia Real': c.transferenciaReal ?? 'N/A',
+      'Débito Real': c.debitoReal ?? 'N/A',
+      'Fiado Total': c.fiadoTotal ?? 'N/A',
+      'Diferencia Arqueo': c.diferenciaTotal ?? 0,
+      'Estado Arqueo':
+        c.estadoArqueo ||
+        (c.diferenciaTotal !== undefined
+          ? c.diferenciaTotal === 0
+            ? 'Cuadrada'
+            : c.diferenciaTotal > 0
+            ? 'Sobrante'
+            : 'Faltante'
+          : 'Histórico'),
+      Compras: c.inv,
       'Costo vendido': c.costoV,
       Ganancia: c.ganancia,
       'Te debían': c.porCobrar,
       'En cuenta': c.enCuenta,
+      Observaciones: c.observaciones || '',
     }));
     XLSX.utils.book_append_sheet(
       wb,

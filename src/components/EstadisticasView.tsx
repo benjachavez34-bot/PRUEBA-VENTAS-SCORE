@@ -19,6 +19,7 @@ interface EstadisticasViewProps {
   productos: Producto[];
   cierres: CierreCaja[];
   onCerrarCaja?: (nombreCierre: string, desde: number, hasta: number) => Promise<void>;
+  onVerDetalleCierre?: (cierre: CierreCaja) => void;
 }
 
 export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
@@ -26,6 +27,7 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
   productos,
   cierres,
   onCerrarCaja,
+  onVerDetalleCierre,
 }) => {
   const [filtro, setFiltro] = useState<FiltroPeriodo>('mes');
   const [refDate, setRefDate] = useState<Date>(new Date());
@@ -570,8 +572,48 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
               }}
             >
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span className="name">{c.nombre}</span>
+                  {c.estadoArqueo ? (
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: 12,
+                        background:
+                          c.estadoArqueo === 'cuadrada'
+                            ? 'rgba(34, 197, 94, 0.15)'
+                            : c.estadoArqueo === 'sobrante'
+                            ? 'rgba(234, 179, 8, 0.15)'
+                            : 'rgba(239, 68, 68, 0.15)',
+                        color:
+                          c.estadoArqueo === 'cuadrada'
+                            ? '#22c55e'
+                            : c.estadoArqueo === 'sobrante'
+                            ? '#eab308'
+                            : '#ef4444',
+                        border: `1px solid ${
+                          c.estadoArqueo === 'cuadrada'
+                            ? 'rgba(34, 197, 94, 0.3)'
+                            : c.estadoArqueo === 'sobrante'
+                            ? 'rgba(234, 179, 8, 0.3)'
+                            : 'rgba(239, 68, 68, 0.3)'
+                        }`,
+                      }}
+                    >
+                      {c.estadoArqueo === 'cuadrada'
+                        ? '🟢 Cuadrada ($0)'
+                        : c.estadoArqueo === 'sobrante'
+                        ? `🟡 Sobrante (+${fmt(c.diferenciaTotal || 0)})`
+                        : `🔴 Faltante (-${fmt(Math.abs(c.diferenciaTotal || 0))})`}
+                    </span>
+                  ) : null}
+                  {c.por ? (
+                    <span className="sub" style={{ fontSize: '0.75rem' }}>
+                      • Por {c.por}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="sub" style={{ marginTop: 2 }}>
                   {c.desdeTxt} → {c.hastaTxt}
@@ -586,6 +628,16 @@ export const EstadisticasView: React.FC<EstadisticasViewProps> = ({
               </div>
 
               <div className="actions" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                {onVerDetalleCierre && (
+                  <button
+                    className="btn-ghost"
+                    style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                    onClick={() => onVerDetalleCierre(c)}
+                    title="Ver desglose completo de arqueo y WhatsApp"
+                  >
+                    📋 Arqueo
+                  </button>
+                )}
                 <button
                   className="btn-primary"
                   style={{ padding: '6px 10px', fontSize: '0.8rem' }}

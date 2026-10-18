@@ -84,6 +84,19 @@ export interface CierreCaja {
   porCobrar: number;
   enCuenta: number;
   por?: string;
+  // Fase 4: Conciliación & Arqueo Ciego
+  efectivoEsperado?: number;
+  efectivoReal?: number;
+  transferenciaEsperado?: number;
+  transferenciaReal?: number;
+  debitoEsperado?: number;
+  debitoReal?: number;
+  fiadoTotal?: number;
+  mermasTotal?: number;
+  diferenciaTotal?: number;
+  estadoArqueo?: 'cuadrada' | 'sobrante' | 'faltante';
+  observaciones?: string;
+  telefonoReporte?: string;
 }
 
 export interface Cliente {

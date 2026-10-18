@@ -52,6 +52,8 @@ import {
   getT0,
   calcResumen,
   porCobrarTotal,
+  calcConciliacionCierre,
+  generarMensajeWhatsAppCierre,
 } from './utils/formatters';
 import { EstadisticasView } from './components/EstadisticasView';
 import { AdminVendedoresView } from './components/AdminVendedoresView';
@@ -59,6 +61,8 @@ import { MiembrosChatView } from './components/MiembrosChatView';
 import { AyudaView } from './components/AyudaView';
 import { ConfiguracionView, ThemeConfig } from './components/ConfiguracionView';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
+import { ModalCerrarCaja } from './components/ModalCerrarCaja';
+import { ModalDetalleCierre } from './components/ModalDetalleCierre';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
 import {
   initializePushNotifications,
@@ -454,6 +458,10 @@ export default function App() {
   // Modal Cerrar Caja
   const [modalCierreOpen, setModalCierreOpen] = useState<boolean>(false);
   const [nombreCierreInput, setNombreCierreInput] = useState<string>('');
+  const [modalDetalleCierre, setModalDetalleCierre] = useState<{
+    isOpen: boolean;
+    cierre: CierreCaja | null;
+  }>({ isOpen: false, cierre: null });
 
   // Modal Entrada de Mercadería
   const [modalEntrada, setModalEntrada] = useState<{
@@ -2467,23 +2475,39 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       showToast('No hay movimientos nuevos desde el último cierre', 'debt');
       return;
     }
-    const defaultName = new Date().toLocaleDateString('es-CL', {
+    const defaultName = `Cierre Turno - ${new Date().toLocaleDateString('es-CL', {
       timeZone: 'America/Santiago',
-      month: 'long',
-      year: 'numeric',
-    });
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
     setNombreCierreInput(defaultName);
     setModalCierreOpen(true);
   };
 
-  const handleConfirmarCerrarCaja = async () => {
-    const nombre = nombreCierreInput.trim();
+  const handleConfirmarCerrarCaja = async (datos: {
+    nombre: string;
+    efectivoReal: number;
+    transferenciaReal: number;
+    debitoReal: number;
+    observaciones: string;
+    telefonoReporte?: string;
+    enviarWhatsApp: boolean;
+  }) => {
+    const nombre = datos.nombre.trim();
     if (!nombre) return;
     const t0Val = getT0(cierres);
     const hasta = Date.now();
     const r = calcResumen(movs, productos, t0Val, hasta);
     const desde = t0Val || (movs.length ? Math.min(...movs.map((m) => m.ts)) : hasta);
     const t = calcResumen(movs, productos, 0, hasta);
+    const conc = calcConciliacionCierre(movs, productos, desde, hasta);
+
+    const difTotal =
+      datos.efectivoReal + datos.transferenciaReal + datos.debitoReal - conc.totalEsperado;
+    const estadoArqueo: 'cuadrada' | 'sobrante' | 'faltante' =
+      difTotal === 0 ? 'cuadrada' : difTotal > 0 ? 'sobrante' : 'faltante';
 
     const cierreData: CierreCaja = {
       nombre,
@@ -2502,7 +2526,39 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       porCobrar: porCobrarTotal(movs),
       enCuenta: t.ingresado - t.inv,
       por: miNombre,
+      efectivoEsperado: conc.efectivoEsperado,
+      efectivoReal: datos.efectivoReal,
+      transferenciaEsperado: conc.transferenciaEsperado,
+      transferenciaReal: datos.transferenciaReal,
+      debitoEsperado: conc.debitoEsperado,
+      debitoReal: datos.debitoReal,
+      fiadoTotal: conc.fiadoTotal,
+      mermasTotal: conc.costoMerma,
+      diferenciaTotal: difTotal,
+      estadoArqueo,
+      observaciones: datos.observaciones || undefined,
+      telefonoReporte: datos.telefonoReporte || undefined,
     };
+
+    if (datos.enviarWhatsApp) {
+      const texto = generarMensajeWhatsAppCierre(cierreData);
+      const tel = datos.telefonoReporte ? datos.telefonoReporte.replace(/\D/g, '') : '';
+      let url = `https://wa.me/?text=${encodeURIComponent(texto)}`;
+      if (tel && tel.length >= 8) {
+        let clean = tel;
+        if (clean.length === 9 && clean.startsWith('9')) clean = '56' + clean;
+        else if (clean.length === 8) clean = '569' + clean;
+        url = `https://wa.me/${clean}?text=${encodeURIComponent(texto)}`;
+      }
+      window.open(url, '_blank');
+    }
+
+    const toastMsg =
+      difTotal === 0
+        ? 'Caja cerrada con éxito: 🟢 Cuadrada ($0)'
+        : difTotal > 0
+        ? `Caja cerrada: 🟡 Sobrante de ${fmt(difTotal)} registrado`
+        : `Caja cerrada: 🔴 Faltante de ${fmt(Math.abs(difTotal))} registrado`;
 
     if (isGuest) {
       const updated = [cierreData, ...cierres];
@@ -2511,14 +2567,14 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         localStorage.setItem('local_cierres', JSON.stringify(updated));
       } catch {}
       setModalCierreOpen(false);
-      showToast('Caja cerrada con éxito. El nuevo período parte en cero.');
+      showToast(toastMsg, difTotal === 0 ? undefined : 'debt');
       return;
     }
 
     try {
       await addDoc(collection(db, 'cierres'), cierreData);
       setModalCierreOpen(false);
-      showToast('Caja cerrada con éxito. El nuevo período parte en cero.');
+      showToast(toastMsg, difTotal === 0 ? undefined : 'debt');
     } catch (e: any) {
       alert('No se pudo cerrar la caja: ' + (e?.message || e));
     }
@@ -5752,9 +5808,56 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   <div id="resCierres">
                     {cierres.length ? (
                       cierres.map((c) => (
-                        <div className="item" key={c.id || c.hasta}>
-                          <div>
-                            <div className="name">{c.nombre}</div>
+                        <div
+                          className="item"
+                          key={c.id || c.hasta}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => setModalDetalleCierre({ isOpen: true, cierre: c })}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span className="name">{c.nombre}</span>
+                              {c.estadoArqueo ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: 12,
+                                    background:
+                                      c.estadoArqueo === 'cuadrada'
+                                        ? 'rgba(34, 197, 94, 0.15)'
+                                        : c.estadoArqueo === 'sobrante'
+                                        ? 'rgba(234, 179, 8, 0.15)'
+                                        : 'rgba(239, 68, 68, 0.15)',
+                                    color:
+                                      c.estadoArqueo === 'cuadrada'
+                                        ? '#22c55e'
+                                        : c.estadoArqueo === 'sobrante'
+                                        ? '#eab308'
+                                        : '#ef4444',
+                                    border: `1px solid ${
+                                      c.estadoArqueo === 'cuadrada'
+                                        ? 'rgba(34, 197, 94, 0.3)'
+                                        : c.estadoArqueo === 'sobrante'
+                                        ? 'rgba(234, 179, 8, 0.3)'
+                                        : 'rgba(239, 68, 68, 0.3)'
+                                    }`,
+                                  }}
+                                >
+                                  {c.estadoArqueo === 'cuadrada'
+                                    ? '🟢 Cuadrada ($0)'
+                                    : c.estadoArqueo === 'sobrante'
+                                    ? `🟡 Sobrante (+${fmt(c.diferenciaTotal || 0)})`
+                                    : `🔴 Faltante (-${fmt(Math.abs(c.diferenciaTotal || 0))})`}
+                                </span>
+                              ) : null}
+                              {c.por ? (
+                                <span className="sub" style={{ fontSize: '0.75rem' }}>
+                                  • Por {c.por}
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="sub">
                               {c.desdeTxt} → {c.hastaTxt}
                             </div>
@@ -5766,10 +5869,23 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                               Te debían {fmt(c.porCobrar)} · En cuenta {fmt(c.enCuenta)}
                             </div>
                           </div>
-                          <div
-                            className={`amount ${c.ganancia >= 0 ? 'ok' : 'debt'}`}
-                          >
-                            {fmt(c.ganancia)}
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                            <div
+                              className={`amount ${c.ganancia >= 0 ? 'ok' : 'debt'}`}
+                            >
+                              {fmt(c.ganancia)}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setModalDetalleCierre({ isOpen: true, cierre: c });
+                              }}
+                            >
+                              📋 Arqueo
+                            </button>
                           </div>
                         </div>
                       ))
@@ -5798,6 +5914,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   movs={movs}
                   productos={productos}
                   cierres={cierres}
+                  onVerDetalleCierre={(cierre) => setModalDetalleCierre({ isOpen: true, cierre })}
                 />
               </section>
             )}
@@ -6831,74 +6948,39 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         </div>
       )}
 
-      {/* MODAL CERRAR CAJA */}
+      {/* MODAL CERRAR CAJA (FASE 4: ARQUEO CIEGO & CONCILIACIÓN) */}
       {modalCierreOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.55)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            padding: 16,
+        <ModalCerrarCaja
+          isOpen={modalCierreOpen}
+          onClose={() => setModalCierreOpen(false)}
+          onConfirmar={handleConfirmarCerrarCaja}
+          nombreDefault={nombreCierreInput}
+          responsable={miNombre}
+          desdeTxt={fTs(
+            getT0(cierres) ||
+              (movs.length ? Math.min(...movs.map((m) => m.ts)) : Date.now())
+          )}
+          hastaTxt={fTs(Date.now())}
+          conciliacion={calcConciliacionCierre(
+            movs,
+            productos,
+            getT0(cierres) ||
+              (movs.length ? Math.min(...movs.map((m) => m.ts)) : Date.now()),
+            Date.now()
+          )}
+        />
+      )}
+
+      {/* MODAL DETALLE DE CIERRE & ARQUEO (FASE 4) */}
+      {modalDetalleCierre.isOpen && (
+        <ModalDetalleCierre
+          isOpen={modalDetalleCierre.isOpen}
+          cierre={modalDetalleCierre.cierre}
+          onClose={() => setModalDetalleCierre({ isOpen: false, cierre: null })}
+          onConsultarEstadisticas={() => {
+            setActiveTab('estadisticas');
           }}
-          onClick={() => setModalCierreOpen(false)}
-        >
-          <div
-            className="card"
-            style={{
-              maxWidth: 440,
-              width: '100%',
-              margin: 0,
-              boxShadow: '0 12px 30px rgba(0, 0, 0, 0.35)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontWeight: 700, fontSize: '1.15rem', marginBottom: 6 }}>
-              🔒 Cerrar caja y generar consolidado
-            </div>
-            <div className="sub" style={{ marginBottom: 12, fontSize: '0.9rem' }}>
-              El período actual quedará guardado en el historial de cierres y comenzará un nuevo período desde cero.
-            </div>
-
-            <div className="row">
-              <div style={{ width: '100%' }}>
-                <span className="sub">Nombre del cierre:</span>
-                <input
-                  type="text"
-                  placeholder="Ej: octubre de 2026"
-                  autoFocus
-                  value={nombreCierreInput}
-                  onChange={(e) => setNombreCierreInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleConfirmarCerrarCaja();
-                    if (e.key === 'Escape') setModalCierreOpen(false);
-                  }}
-                  style={{ marginTop: 4 }}
-                />
-              </div>
-            </div>
-
-            <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setModalCierreOpen(false)}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleConfirmarCerrarCaja}
-              >
-                Confirmar cierre de caja
-              </button>
-            </div>
-          </div>
-        </div>
+        />
       )}
 
       {/* MODAL ENTRADA DE STOCK */}

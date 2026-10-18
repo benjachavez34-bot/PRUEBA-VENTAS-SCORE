@@ -419,3 +419,169 @@ export function calcEstadisticas(
   };
 }
 
+export interface ConciliacionCierre {
+  desde: number;
+  hasta: number;
+  ventasEfectivo: number;
+  pagosEfectivo: number;
+  efectivoEsperado: number;
+  transferenciaEsperado: number;
+  debitoEsperado: number;
+  fiadoTotal: number;
+  costoMerma: number;
+  mermasCant: number;
+  totalEsperado: number;
+  totalVentas: number;
+  unidadesVendidas: number;
+  transacciones: number;
+}
+
+export function calcConciliacionCierre(
+  movs: Movimiento[],
+  productos: Producto[],
+  desde: number,
+  hasta: number
+): ConciliacionCierre {
+  const cu: Record<string, number> = {};
+  productos.forEach((p) => {
+    cu[p.id] = costoUnit(p.id, movs);
+  });
+
+  let ventasEfectivo = 0;
+  let pagosEfectivo = 0;
+  let transferenciaEsperado = 0;
+  let debitoEsperado = 0;
+  let fiadoTotal = 0;
+  let costoMerma = 0;
+  let mermasCant = 0;
+  let totalVentas = 0;
+  let unidadesVendidas = 0;
+  let transacciones = 0;
+
+  movs.forEach((m) => {
+    if (!(m.ts > desde && m.ts <= hasta)) return;
+    const pid = m.productoId || '';
+
+    if (m.tipo === 'venta') {
+      transacciones++;
+      totalVentas += m.total || 0;
+      unidadesVendidas += m.cant || 0;
+
+      if (m.fiado) {
+        fiadoTotal += m.total || 0;
+      } else {
+        const mp = m.medioPago || 'efectivo';
+        if (mp === 'transferencia') {
+          transferenciaEsperado += m.total || 0;
+        } else if (mp === 'debito') {
+          debitoEsperado += m.total || 0;
+        } else {
+          // 'efectivo' o no especificado
+          ventasEfectivo += m.total || 0;
+        }
+      }
+    } else if (m.tipo === 'pago') {
+      pagosEfectivo += m.total || 0;
+    } else if (m.tipo === 'merma') {
+      const c = (m.cant || 0) * (cu[pid] || 0);
+      costoMerma += c;
+      mermasCant += m.cant || 0;
+    }
+  });
+
+  const efectivoEsperado = ventasEfectivo + pagosEfectivo;
+  const totalEsperado = efectivoEsperado + transferenciaEsperado + debitoEsperado;
+
+  return {
+    desde,
+    hasta,
+    ventasEfectivo,
+    pagosEfectivo,
+    efectivoEsperado,
+    transferenciaEsperado,
+    debitoEsperado,
+    fiadoTotal,
+    costoMerma,
+    mermasCant,
+    totalEsperado,
+    totalVentas,
+    unidadesVendidas,
+    transacciones,
+  };
+}
+
+export function generarMensajeWhatsAppCierre(
+  cierre: CierreCaja,
+  nombreTienda = 'Ventas Score'
+): string {
+  const efEsp = cierre.efectivoEsperado ?? 0;
+  const efReal = cierre.efectivoReal ?? efEsp;
+  const difEf = efReal - efEsp;
+
+  const trEsp = cierre.transferenciaEsperado ?? 0;
+  const trReal = cierre.transferenciaReal ?? trEsp;
+  const difTr = trReal - trEsp;
+
+  const debEsp = cierre.debitoEsperado ?? 0;
+  const debReal = cierre.debitoReal ?? debEsp;
+  const difDeb = debReal - debEsp;
+
+  const totalEsperado = efEsp + trEsp + debEsp;
+  const totalReal = efReal + trReal + debReal;
+  const difTotal =
+    cierre.diferenciaTotal !== undefined
+      ? cierre.diferenciaTotal
+      : totalReal - totalEsperado;
+
+  let estadoTexto = 'CAJA CUADRADA ($0)';
+  let estadoIcono = '🟢';
+  if (difTotal > 0) {
+    estadoTexto = `SOBRANTE (+${fmt(difTotal)})`;
+    estadoIcono = '🟡';
+  } else if (difTotal < 0) {
+    estadoTexto = `FALTANTE (-${fmt(Math.abs(difTotal))})`;
+    estadoIcono = '🔴';
+  }
+
+  const lines = [
+    `🔒 REPORTE DE CIERRE DE CAJA`,
+    `Negocio: ${nombreTienda}`,
+    `Turno: ${cierre.nombre}`,
+    `Responsable: ${cierre.por || 'Cajero de turno'}`,
+    `Período: ${cierre.desdeTxt} -> ${cierre.hastaTxt}`,
+    `----------------------------------------`,
+    `RESUMEN OPERATIVO`,
+    `• Ventas totales: ${fmt(cierre.vend)} (${cierre.ventas} ventas)`,
+    `• Dinero ingresado: ${fmt(cierre.ingresado)}`,
+    `• Ganancia calculada: ${fmt(cierre.ganancia)}`,
+    cierre.fiadoTotal ? `• Fiados otorgados: ${fmt(cierre.fiadoTotal)}` : null,
+    cierre.mermasTotal ? `• Mermas/Desperdicio: ${fmt(cierre.mermasTotal)}` : null,
+    `----------------------------------------`,
+    `DESGLOSE POR MEDIO DE PAGO`,
+    `• Efectivo:`,
+    `  - Esperado: ${fmt(efEsp)}`,
+    `  - Real en mano: ${fmt(efReal)}`,
+    `  - Dif: ${difEf === 0 ? '$0' : difEf > 0 ? `+${fmt(difEf)}` : `-${fmt(Math.abs(difEf))}`}`,
+    `• Transferencias:`,
+    `  - Esperado: ${fmt(trEsp)}`,
+    `  - Real confirmado: ${fmt(trReal)}`,
+    `  - Dif: ${difTr === 0 ? '$0' : difTr > 0 ? `+${fmt(difTr)}` : `-${fmt(Math.abs(difTr))}`}`,
+    `• Tarjetas Débito / POS:`,
+    `  - Esperado: ${fmt(debEsp)}`,
+    `  - Real comprobantes: ${fmt(debReal)}`,
+    `  - Dif: ${difDeb === 0 ? '$0' : difDeb > 0 ? `+${fmt(difDeb)}` : `-${fmt(Math.abs(difDeb))}`}`,
+    `----------------------------------------`,
+    `AUDITORIA Y ARQUEO`,
+    `• Total Esperado: ${fmt(totalEsperado)}`,
+    `• Total Real Declarado: ${fmt(totalReal)}`,
+    `• Estado: ${estadoIcono} ${estadoTexto}`,
+    cierre.observaciones
+      ? `• Observaciones: ${cierre.observaciones}`
+      : `• Observaciones: Sin observaciones`,
+    `----------------------------------------`,
+    `Generado por Sistema Ventas Score`,
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
