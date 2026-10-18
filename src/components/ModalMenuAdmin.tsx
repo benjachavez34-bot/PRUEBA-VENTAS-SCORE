@@ -159,7 +159,7 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {/* CENTRO FINANCIERO: CAJA & ARQUEO */}
+              {/* CENTRO FINANCIERO & BI INTEGRADO */}
               <button
                 type="button"
                 className="btn-ghost"
@@ -171,11 +171,11 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                   padding: '12px 14px',
                   borderRadius: 12,
                   background:
-                    activeTab === 'resumen'
+                    activeTab === 'resumen' || activeTab === 'estadisticas'
                       ? 'rgba(37, 99, 235, 0.15)'
                       : 'rgba(0, 0, 0, 0.05)',
                   border: `1px solid ${
-                    activeTab === 'resumen'
+                    activeTab === 'resumen' || activeTab === 'estadisticas'
                       ? 'var(--accent)'
                       : 'var(--border)'
                   }`,
@@ -188,49 +188,10 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                   <span style={{ fontSize: '1.35rem' }}>💰</span>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
-                      Caja, Turno & Arqueo Ciego
+                      Centro Financiero & BI
                     </div>
                     <div className="sub" style={{ fontSize: '0.75rem' }}>
-                      Dinero en cuenta, ingresos del turno y consolidado de caja
-                    </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>→</span>
-              </button>
-
-              {/* CENTRO FINANCIERO: BI & ESTADÍSTICAS */}
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => handleSelect('estadisticas')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                  borderRadius: 12,
-                  background:
-                    activeTab === 'estadisticas'
-                      ? 'rgba(37, 99, 235, 0.15)'
-                      : 'rgba(0, 0, 0, 0.05)',
-                  border: `1px solid ${
-                    activeTab === 'estadisticas'
-                      ? 'var(--accent)'
-                      : 'var(--border)'
-                  }`,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  width: '100%',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: '1.35rem' }}>📊</span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
-                      Inteligencia BI & Estadísticas
-                    </div>
-                    <div className="sub" style={{ fontSize: '0.75rem' }}>
-                      Métricas predictivas, horarios punta, rentabilidad y Excel
+                      Caja, turnos, arqueos, analítica predictiva y métricas BI
                     </div>
                   </div>
                 </div>
