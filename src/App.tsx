@@ -368,6 +368,7 @@ export default function App() {
   const [posMedioPago, setPosMedioPago] = useState<MedioPago>('efectivo');
   const [posPagoCon, setPosPagoCon] = useState<string>('');
   const [posDescuento, setPosDescuento] = useState<string>('');
+  const [posTipoAjuste, setPosTipoAjuste] = useState<'descuento' | 'recargo'>('descuento');
   const [posCliente, setPosCliente] = useState<string>('');
   const [posTelefono, setPosTelefono] = useState<string>('');
   const [scannerPosOpen, setScannerPosOpen] = useState<boolean>(false);
@@ -1810,6 +1811,23 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     );
   };
 
+  const handleUpdateCartPrecioUnit = (prodId: string, newPrecio: number) => {
+    const p = Math.max(0, newPrecio);
+    setCart((prev) =>
+      prev.map((it) => {
+        if (it.producto.id === prodId) {
+          return {
+            ...it,
+            precioUnit: p,
+            subtotal: it.cant * p,
+          };
+        }
+        return it;
+      })
+    );
+    showToast(`Precio actualizado: ${fmt(p)}`);
+  };
+
   const handleRemoveFromCart = (prodId: string) => {
     setCart((prev) => prev.filter((it) => it.producto.id !== prodId));
   };
@@ -1818,6 +1836,7 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     setCart([]);
     setPosPagoCon('');
     setPosDescuento('');
+    setPosTipoAjuste('descuento');
     setPosCliente('');
     setPosTelefono('');
   };
@@ -1843,8 +1862,10 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     }
 
     const subtotal = cart.reduce((sum, it) => sum + it.subtotal, 0);
-    const descuento = Math.max(0, parseFloat(posDescuento) || 0);
-    const total = Math.max(0, subtotal - descuento);
+    const montoAjuste = Math.max(0, parseFloat(posDescuento) || 0);
+    const descuento = posTipoAjuste === 'descuento' ? montoAjuste : 0;
+    const recargo = posTipoAjuste === 'recargo' ? montoAjuste : 0;
+    const total = Math.max(0, subtotal - descuento + recargo);
     const cliente = posCliente.trim();
     const tel = posTelefono.trim();
 
@@ -1874,9 +1895,10 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     const isFiado = posMedioPago === 'fiado';
 
     // Registrar cada item en movimientos (100% compatible con stockDe, cierres y reportes)
+    const netoAjuste = recargo - descuento;
     for (const it of cart) {
       const ratio = subtotal > 0 ? it.subtotal / subtotal : 1 / cart.length;
-      const itemTotal = Math.round(it.subtotal - descuento * ratio);
+      const itemTotal = Math.max(0, Math.round(it.subtotal + netoAjuste * ratio));
       await addMov({
         tipo: 'venta',
         productoId: it.producto.id,
@@ -1898,6 +1920,7 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       items: [...cart],
       subtotal,
       descuento,
+      recargo,
       total,
       medioPago: posMedioPago,
       pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
@@ -1939,7 +1962,7 @@ PRODUCTOS:
 ${itemsLines}
 ----------------------------------------
 Subtotal: ${fmt(ticket.subtotal)}
-${ticket.descuento > 0 ? `Descuento: -${fmt(ticket.descuento)}\n` : ''}TOTAL: ${fmt(ticket.total)}
+${ticket.descuento > 0 ? `Descuento: -${fmt(ticket.descuento)}\n` : ''}${ticket.recargo && ticket.recargo > 0 ? `Recargo / Aumento: +${fmt(ticket.recargo)}\n` : ''}TOTAL: ${fmt(ticket.total)}
 Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
 
 ¡Muchas gracias por tu compra en Ventas Score!
@@ -4984,6 +5007,12 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                     <span>-{fmt(modalTicket.descuento)}</span>
                   </div>
                 )}
+                {Boolean(modalTicket.recargo && modalTicket.recargo > 0) && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#f59e0b' }}>
+                    <span>Recargo / Aumento:</span>
+                    <span>+{fmt(modalTicket.recargo || 0)}</span>
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.15rem', fontWeight: 900, marginTop: 4 }}>
                   <span>TOTAL:</span>
                   <span style={{ color: 'var(--accent)' }}>{fmt(modalTicket.total)}</span>
@@ -6400,16 +6429,19 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         clientes={clientes}
       />
 
-      {/* MODAL CHECKOUT DESLIZABLE POS (FASE B) */}
+      {/* MODAL CHECKOUT DESLIZABLE POS (FASE B & AJUSTE PRECIOS) */}
       <ModalCheckoutPOS
         isOpen={modalCheckoutOpen}
         onClose={() => setModalCheckoutOpen(false)}
         cart={cart}
         onUpdateCartCant={handleUpdateCartCant}
+        onUpdateCartPrecioUnit={handleUpdateCartPrecioUnit}
         onRemoveFromCart={handleRemoveFromCart}
         onClearCart={handleClearCart}
         posDescuento={posDescuento}
         setPosDescuento={setPosDescuento}
+        posTipoAjuste={posTipoAjuste}
+        setPosTipoAjuste={setPosTipoAjuste}
         posMedioPago={posMedioPago}
         setPosMedioPago={setPosMedioPago}
         posPagoCon={posPagoCon}

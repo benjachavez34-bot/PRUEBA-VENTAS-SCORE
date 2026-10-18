@@ -7,10 +7,13 @@ interface ModalCheckoutPOSProps {
   onClose: () => void;
   cart: CartItem[];
   onUpdateCartCant: (productoId: string, cant: number) => void;
+  onUpdateCartPrecioUnit: (productoId: string, newPrecio: number) => void;
   onRemoveFromCart: (productoId: string) => void;
   onClearCart: () => void;
   posDescuento: string;
   setPosDescuento: (val: string) => void;
+  posTipoAjuste: 'descuento' | 'recargo';
+  setPosTipoAjuste: (val: 'descuento' | 'recargo') => void;
   posMedioPago: MedioPago;
   setPosMedioPago: (val: MedioPago) => void;
   posPagoCon: string;
@@ -29,10 +32,13 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
   onClose,
   cart,
   onUpdateCartCant,
+  onUpdateCartPrecioUnit,
   onRemoveFromCart,
   onClearCart,
   posDescuento,
   setPosDescuento,
+  posTipoAjuste,
+  setPosTipoAjuste,
   posMedioPago,
   setPosMedioPago,
   posPagoCon,
@@ -47,9 +53,14 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const [editingPriceId, setEditingPriceId] = React.useState<string | null>(null);
+  const [editingPriceVal, setEditingPriceVal] = React.useState<string>('');
+
   const subtotal = cart.reduce((s, it) => s + it.subtotal, 0);
-  const desc = Math.max(0, parseFloat(posDescuento) || 0);
-  const total = Math.max(0, subtotal - desc);
+  const montoAjuste = Math.max(0, parseFloat(posDescuento) || 0);
+  const descuento = posTipoAjuste === 'descuento' ? montoAjuste : 0;
+  const recargo = posTipoAjuste === 'recargo' ? montoAjuste : 0;
+  const total = Math.max(0, subtotal - descuento + recargo);
   const parsedPago = parseFloat(posPagoCon);
   const pagoConVal = isNaN(parsedPago) ? total : parsedPago;
   const vueltoVal = Math.max(0, pagoConVal - total);
@@ -179,9 +190,80 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
                   <div style={{ fontWeight: 700, fontSize: '0.86rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {it.producto.nombre}
                   </div>
-                  <div className="sub" style={{ fontSize: '0.74rem' }}>
-                    {fmt(it.precioUnit)} c/u
-                  </div>
+                  {editingPriceId === it.producto.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--muted)' }}>$</span>
+                      <input
+                        type="number"
+                        value={editingPriceVal}
+                        onChange={(e) => setEditingPriceVal(e.target.value)}
+                        style={{ width: 85, padding: '3px 6px', fontSize: '0.80rem', borderRadius: 4 }}
+                        autoFocus
+                        placeholder={String(it.precioUnit)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const p = parseFloat(editingPriceVal);
+                            if (!isNaN(p) && p >= 0) {
+                              onUpdateCartPrecioUnit(it.producto.id, p);
+                            }
+                            setEditingPriceId(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingPriceId(null);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-green"
+                        style={{ padding: '2px 7px', fontSize: '0.74rem', borderRadius: 4 }}
+                        onClick={() => {
+                          const p = parseFloat(editingPriceVal);
+                          if (!isNaN(p) && p >= 0) {
+                            onUpdateCartPrecioUnit(it.producto.id, p);
+                          }
+                          setEditingPriceId(null);
+                        }}
+                        title="Confirmar nuevo precio"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        style={{ padding: '2px 6px', fontSize: '0.74rem', borderRadius: 4 }}
+                        onClick={() => setEditingPriceId(null)}
+                        title="Cancelar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <span className="sub" style={{ fontSize: '0.74rem' }}>
+                        {fmt(it.precioUnit)} c/u
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '1px 6px',
+                          color: 'var(--accent)',
+                          border: '1px solid rgba(37,99,235,0.3)',
+                          borderRadius: 4,
+                          background: 'rgba(37,99,235,0.08)',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setEditingPriceId(it.producto.id);
+                          setEditingPriceVal(String(it.precioUnit));
+                        }}
+                        title="Modificar precio unitario en esta ocasión"
+                      >
+                        ✏️ Modificar
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* CONTROLES CANTIDAD */}
@@ -225,22 +307,88 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
           </div>
         </div>
 
-        {/* TOTAL, DESCUENTO Y SUB-TOTAL */}
+        {/* TOTAL, AJUSTE (DESCUENTO / RECARGO) Y SUB-TOTAL */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <span className="sub" style={{ fontSize: '0.82rem' }}>Subtotal:</span>
+            <span className="sub" style={{ fontSize: '0.82rem' }}>Subtotal productos:</span>
             <span style={{ fontWeight: 700 }}>{fmt(subtotal)}</span>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 10 }}>
-            <span className="sub" style={{ fontSize: '0.82rem' }}>Descuento / Rebaja $:</span>
-            <input
-              type="number"
-              placeholder="0"
-              value={posDescuento}
-              onChange={(e) => setPosDescuento(e.target.value)}
-              style={{ width: 110, fontSize: '0.88rem', textAlign: 'right', padding: '6px 10px' }}
-            />
+          {/* SELECTOR DE AJUSTE: DESCUENTO (-) O RECARGO (+) */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 8,
+              gap: 8,
+              flexWrap: 'wrap',
+              background: 'rgba(0, 0, 0, 0.12)',
+              padding: '6px 10px',
+              borderRadius: 8,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                type="button"
+                style={{
+                  padding: '3px 10px',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  borderRadius: 14,
+                  cursor: 'pointer',
+                  background: posTipoAjuste === 'descuento' ? '#16a34a' : 'transparent',
+                  color: posTipoAjuste === 'descuento' ? '#fff' : 'var(--text)',
+                  border: `1px solid ${posTipoAjuste === 'descuento' ? '#16a34a' : 'var(--border)'}`,
+                  transition: 'all 0.15s ease',
+                }}
+                onClick={() => setPosTipoAjuste('descuento')}
+              >
+                🏷️ Descuento (-)
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: '3px 10px',
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  borderRadius: 14,
+                  cursor: 'pointer',
+                  background: posTipoAjuste === 'recargo' ? 'var(--accent)' : 'transparent',
+                  color: posTipoAjuste === 'recargo' ? '#fff' : 'var(--text)',
+                  border: `1px solid ${posTipoAjuste === 'recargo' ? 'var(--accent)' : 'var(--border)'}`,
+                  transition: 'all 0.15s ease',
+                }}
+                onClick={() => setPosTipoAjuste('recargo')}
+              >
+                ➕ Recargo / Aumento (+)
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  color: posTipoAjuste === 'recargo' ? 'var(--accent)' : '#16a34a',
+                }}
+              >
+                {posTipoAjuste === 'recargo' ? '+$' : '-$'}
+              </span>
+              <input
+                type="number"
+                placeholder="0"
+                value={posDescuento}
+                onChange={(e) => setPosDescuento(e.target.value)}
+                style={{
+                  width: 95,
+                  fontSize: '0.88rem',
+                  textAlign: 'right',
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                }}
+              />
+            </div>
           </div>
 
           <div

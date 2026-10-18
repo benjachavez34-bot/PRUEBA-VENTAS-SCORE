@@ -31,6 +31,7 @@ export interface TicketVenta {
   items: CartItem[];
   subtotal: number;
   descuento: number;
+  recargo?: number;
   total: number;
   medioPago: MedioPago;
   pagoCon?: number;
