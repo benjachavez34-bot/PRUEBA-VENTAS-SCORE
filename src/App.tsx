@@ -79,6 +79,8 @@ import {
 import scoreBgDesktop from './assets/images/score_surtidas_desktop_bg_1792157664500.jpg';
 import scoreGorillaLogo from './assets/images/score_gorilla_bg_1791923074721.jpg';
 
+export const SUPER_ADMIN_EMAIL = 'benja.chavez34@gmail.com';
+
 export const ADMIN_EMAILS = [
   'benja.chavez34@gmail.com',
   'fco.inzunza.re@gmail.com',
@@ -86,13 +88,46 @@ export const ADMIN_EMAILS = [
 
 export const ADMIN_ONLY_TABS = ['resumen', 'estadisticas', 'equipo', 'configuracion'];
 
-export const isUserAdmin = (email?: string | null): boolean => {
+export const isUserAdmin = (
+  email?: string | null,
+  dynamicAdminEmails?: string[],
+  miembrosList?: Miembro[]
+): boolean => {
+  if (!email) {
+    try {
+      const rol = localStorage.getItem('sesion_activa_rol');
+      if (rol === 'admin') return true;
+    } catch {}
+    return false;
+  }
+  const cleanEmail = email.toLowerCase().trim();
+  // El Administrador Principal Benjamín Chávez SIEMPRE es Admin supremo
+  if (cleanEmail === SUPER_ADMIN_EMAIL) return true;
+
+  // 1. Si se provee la lista dinámica sincronizada en Firestore
+  if (dynamicAdminEmails && dynamicAdminEmails.length > 0) {
+    return dynamicAdminEmails.some((e) => e.toLowerCase().trim() === cleanEmail);
+  }
+
+  // 2. Si se provee la lista de miembros
+  if (miembrosList && miembrosList.length > 0) {
+    const m = miembrosList.find((x) => x.email?.toLowerCase().trim() === cleanEmail);
+    if (m) return !!m.isAdmin;
+  }
+
+  // 3. Fallback a caché en localStorage
   try {
-    const rol = localStorage.getItem('sesion_activa_rol');
-    if (rol === 'admin') return true;
+    const raw = localStorage.getItem('admin_emails');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.some((e: string) => (e || '').toLowerCase().trim() === cleanEmail);
+      }
+    }
   } catch {}
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+
+  // 4. Default histórico inicial
+  return ADMIN_EMAILS.some((e) => e.toLowerCase().trim() === cleanEmail);
 };
 
 export interface PerfilUsuario {
@@ -279,6 +314,55 @@ export default function App() {
     avatarId?: string;
   } | null>(null);
   const [mensajesNoLeidos, setMensajesNoLeidos] = useState<number>(0);
+
+  // Lista dinámica de correos administradores autorizados sincronizada en Firestore
+  const [adminEmails, setAdminEmails] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('admin_emails');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return Array.from(
+            new Set([
+              SUPER_ADMIN_EMAIL,
+              ...parsed.map((e: string) => (e || '').toLowerCase().trim()).filter(Boolean),
+            ])
+          );
+        }
+      }
+    } catch {}
+    return [SUPER_ADMIN_EMAIL, 'fco.inzunza.re@gmail.com'];
+  });
+
+  // Suscripción en tiempo real a las autorizaciones y roles en Firestore (configuracion/permisos)
+  useEffect(() => {
+    try {
+      const unsubPermisos = onSnapshot(
+        doc(db, 'configuracion', 'permisos'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (Array.isArray(data.adminEmails)) {
+              const list = Array.from(
+                new Set([
+                  SUPER_ADMIN_EMAIL,
+                  ...data.adminEmails.map((e: string) => (e || '').toLowerCase().trim()).filter(Boolean),
+                ])
+              );
+              setAdminEmails(list);
+              try {
+                localStorage.setItem('admin_emails', JSON.stringify(list));
+              } catch {}
+            }
+          }
+        },
+        (err) => console.log('[Permisos] Estado sincronización permisos:', err)
+      );
+      return () => unsubPermisos();
+    } catch (e) {
+      console.log('[Permisos] Error conectando a permisos:', e);
+    }
+  }, []);
 
   // Estado de Mi Cuenta (Perfil)
   const [modalCuentaOpen, setModalCuentaOpen] = useState<boolean>(false);
@@ -2812,8 +2896,13 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     document.title = `${pageTitle} — Ventas Score`;
   }, [pageTitle]);
 
-  // Rol de Administrador para benja.chavez34@gmail.com y fco.inzunza.re@gmail.com
-  const isAdmin = isUserAdmin(user?.email);
+  // Rol de Administrador para benja.chavez34@gmail.com y miembros autorizados dinámicamente
+  const isSuperAdmin =
+    (user?.email || perfil.email || '').toLowerCase().trim() === SUPER_ADMIN_EMAIL;
+
+  const isAdmin = useMemo(() => {
+    return isUserAdmin(user?.email || perfil.email, adminEmails, miembros);
+  }, [user?.email, perfil.email, adminEmails, miembros]);
 
   useEffect(() => {
     if (!isAdmin && ADMIN_ONLY_TABS.includes(activeTab)) {
@@ -2861,6 +2950,124 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       showToast(isAdmin ? 'Indicación oficial enviada al equipo' : 'Mensaje enviado');
     } catch (e: any) {
       alert('No se pudo enviar el mensaje: ' + (e?.message || e));
+    }
+  };
+
+  // Función exclusiva del Administrador Principal (Benjamín Chávez) para gestionar autorizaciones
+  const handleToggleAdminMember = async (targetEmail: string, makeAdmin: boolean) => {
+    const cleanTarget = (targetEmail || '').toLowerCase().trim();
+    if (!cleanTarget) return;
+
+    if (cleanTarget === SUPER_ADMIN_EMAIL && !makeAdmin) {
+      showToast('⚠️ No se pueden revocar los permisos del Administrador Principal');
+      return;
+    }
+
+    if (!isSuperAdmin) {
+      showToast('❌ Solo el Administrador Principal (Benjamín Chávez) puede modificar autorizaciones');
+      return;
+    }
+
+    try {
+      // 1. Calcular nueva lista de correos administradores autorizados
+      let nextAdmins = [...adminEmails];
+      if (makeAdmin) {
+        if (!nextAdmins.some((e) => e.toLowerCase().trim() === cleanTarget)) {
+          nextAdmins.push(cleanTarget);
+        }
+      } else {
+        nextAdmins = nextAdmins.filter((e) => e.toLowerCase().trim() !== cleanTarget);
+      }
+      if (!nextAdmins.includes(SUPER_ADMIN_EMAIL)) {
+        nextAdmins.unshift(SUPER_ADMIN_EMAIL);
+      }
+
+      // 2. Actualizar estado local inmediato y caché en localStorage
+      setAdminEmails(nextAdmins);
+      try {
+        localStorage.setItem('admin_emails', JSON.stringify(nextAdmins));
+      } catch {}
+
+      // 3. Persistir en Firestore doc(db, 'configuracion', 'permisos')
+      await setDoc(
+        doc(db, 'configuracion', 'permisos'),
+        {
+          adminEmails: nextAdmins,
+          actualizadoPor: SUPER_ADMIN_EMAIL,
+          actualizadoEn: Date.now(),
+        },
+        { merge: true }
+      );
+
+      // 4. Actualizar colección 'miembros' en Firestore
+      const matchingMiembros = miembros.filter(
+        (m) => m.email?.toLowerCase().trim() === cleanTarget
+      );
+
+      if (matchingMiembros.length > 0) {
+        for (const m of matchingMiembros) {
+          const docId = m.id || cleanTarget.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const nuevoRol = makeAdmin
+            ? (!m.rol || m.rol.toLowerCase().includes('vendedor') ? 'Administrador' : m.rol)
+            : (m.rol.toLowerCase().includes('admin') ? 'Vendedor' : m.rol);
+
+          await setDoc(
+            doc(db, 'miembros', docId),
+            {
+              isAdmin: makeAdmin,
+              rol: nuevoRol,
+              actualizadoEn: Date.now(),
+            },
+            { merge: true }
+          );
+        }
+      } else {
+        const emailDocId = cleanTarget.replace(/[^a-zA-Z0-9_-]/g, '_');
+        await setDoc(
+          doc(db, 'miembros', emailDocId),
+          {
+            id: emailDocId,
+            email: cleanTarget,
+            nombre: cleanTarget.split('@')[0],
+            rol: makeAdmin ? 'Administrador' : 'Vendedor',
+            isAdmin: makeAdmin,
+            telefono: '',
+            sucursal: 'Ruta Comercial',
+            avatarId: makeAdmin ? 'gorilla' : 'avatar2',
+            estado: 'disponible',
+            actualizadoEn: Date.now(),
+          },
+          { merge: true }
+        );
+      }
+
+      // 5. Sincronizar en colección 'usuarios' si el registro existe
+      try {
+        const qUsuarios = query(collection(db, 'usuarios'), where('email', '==', cleanTarget));
+        const snapU = await getDocs(qUsuarios);
+        for (const d of snapU.docs) {
+          await setDoc(
+            doc(db, 'usuarios', d.id),
+            {
+              isAdmin: makeAdmin,
+              rol: makeAdmin ? 'Administrador' : 'Vendedor',
+              actualizadoEn: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+      } catch (eU) {
+        console.log('[Permisos] Sincronización en usuarios:', eU);
+      }
+
+      showToast(
+        makeAdmin
+          ? `✓ Permisos de Administrador concedidos a ${cleanTarget}`
+          : `✓ Permisos de Administrador revocados a ${cleanTarget}`
+      );
+    } catch (err: any) {
+      console.error('Error modificando autorización:', err);
+      showToast('Error al actualizar permisos en el servidor');
     }
   };
 
@@ -4422,6 +4629,9 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   telefonoActual={perfil.telefono}
                   sucursalActual={perfil.sucursal}
                   isAdmin={isAdmin}
+                  isSuperAdmin={isSuperAdmin}
+                  adminEmails={adminEmails}
+                  onToggleAdminMember={handleToggleAdminMember}
                   onEnviarMensaje={handleEnviarMensaje}
                   onOpenMiCuenta={() => {
                     setEditPerfil(perfil);

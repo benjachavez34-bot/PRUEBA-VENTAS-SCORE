@@ -338,11 +338,13 @@ function responderDudaApp(pregunta: string, isAdmin: boolean): RespuestaIA {
   ) {
     return {
       texto:
-        '👑 **Roles y Permisos en Ventas Score**:\n\n' +
-        '• **Administradores Autorizados**: **Benjamín Chávez** (`benja.chavez34@gmail.com`) y **Francisco Inzunza** (`fco.inzunza.re@gmail.com`).\n' +
-        '  - Acceso total a: Ventas POS, Deudores, Control de Stock, Resumen financiero, Estadísticas BI, Cierres de caja, Miembros, Chat oficial y Panel de Supervisión.\n\n' +
-        '• **Vendedores (Equipo Comercial)**:\n' +
-        '  - Acceso enfocado a: Registro de Ventas en ruta, consulta y cobranza de Deudores con comprobantes, catálogo de Stock disponible y configuración de perfil.',
+        '👑 **Roles y Niveles de Autorización en Ventas Score**:\n\n' +
+        '• **Administrador Principal & Propietario**: **Benjamín Chávez** (`benja.chavez34@gmail.com`).\n' +
+        '  - Posee la facultad exclusiva de **otorgar y revocar permisos de Administrador** a cualquier miembro del equipo directamente desde la pestaña "Miembros & Chat".\n\n' +
+        '• **Nivel Administrador**:\n' +
+        '  - Acceso total a: Caja y Turnos, Arqueo Ciego, Estadísticas BI predictivas, Reporte de Rentabilidad por producto, Márgenes de Costo, Valoración de Bodega, Mermas express y Supervisión del equipo de ventas.\n\n' +
+        '• **Nivel Vendedor (Equipo Comercial)**:\n' +
+        '  - Acceso enfocado a: Registro de Ventas en Punto de Venta (POS), Clientes y Cobranzas con WhatsApp, Catálogo de Stock en ruta y Chat corporativo (con funciones de gerencia y finanzas resguardadas).',
     };
   }
 

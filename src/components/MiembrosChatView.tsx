@@ -14,18 +14,28 @@ interface MiembrosChatViewProps {
   telefonoActual?: string;
   sucursalActual?: string;
   isAdmin: boolean;
+  isSuperAdmin?: boolean;
+  adminEmails?: string[];
+  onToggleAdminMember?: (email: string, makeAdmin: boolean) => Promise<void>;
   onEnviarMensaje: (texto: string, tipo: 'general' | 'indicacion' | 'urgente') => Promise<void>;
   onOpenMiCuenta: () => void;
 }
 
-const ADMIN_EMAILS = [
+export const SUPER_ADMIN_EMAIL = 'benja.chavez34@gmail.com';
+
+const ADMIN_EMAILS_DEFAULT = [
   'benja.chavez34@gmail.com',
   'fco.inzunza.re@gmail.com',
 ];
 
-const esAdminEmail = (email?: string) => {
+const esAdminEmail = (email?: string, dynamicAdmins?: string[]) => {
   if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+  const clean = email.toLowerCase().trim();
+  if (clean === SUPER_ADMIN_EMAIL) return true;
+  if (dynamicAdmins && dynamicAdmins.length > 0) {
+    return dynamicAdmins.some((e) => e.toLowerCase().trim() === clean);
+  }
+  return ADMIN_EMAILS_DEFAULT.includes(clean);
 };
 
 export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
@@ -38,6 +48,9 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   telefonoActual,
   sucursalActual,
   isAdmin,
+  isSuperAdmin = false,
+  adminEmails,
+  onToggleAdminMember,
   onEnviarMensaje,
   onOpenMiCuenta,
 }) => {
@@ -46,6 +59,8 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   const [tipoMensaje, setTipoMensaje] = useState<'general' | 'indicacion' | 'urgente'>('general');
   const [enviando, setEnviando] = useState<boolean>(false);
   const [filtroTexto, setFiltroTexto] = useState<string>('');
+  const [nuevoEmailAdmin, setNuevoEmailAdmin] = useState<string>('');
+  const [procesandoAutorizacion, setProcesandoAutorizacion] = useState<boolean>(false);
   const [permisoNotif, setPermisoNotif] = useState<NotificationPermission | null>(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       return Notification.permission;
@@ -53,6 +68,52 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     return null;
   });
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const isMeSuperAdmin = isSuperAdmin || emailActual?.toLowerCase().trim() === SUPER_ADMIN_EMAIL;
+
+  const handleConfirmToggleAdmin = async (targetEmail: string, makeAdmin: boolean, targetName: string) => {
+    if (!targetEmail || procesandoAutorizacion) return;
+    const action = makeAdmin ? 'otorgar permisos de Administrador a' : 'revocar los permisos de Administrador a';
+    const detail = makeAdmin
+      ? 'Tendrá acceso completo a Caja, Arqueos, Finanzas, Estadísticas BI, Costos, Mermas y Supervisión.'
+      : 'Pasará a nivel Vendedor: las secciones de finanzas, caja, costos y gerencia quedarán ocultas.';
+
+    if (window.confirm(`¿Estás seguro de ${action} ${targetName || targetEmail}?\n\n${detail}`)) {
+      try {
+        setProcesandoAutorizacion(true);
+        if (onToggleAdminMember) {
+          await onToggleAdminMember(targetEmail, makeAdmin);
+        }
+      } finally {
+        setProcesandoAutorizacion(false);
+      }
+    }
+  };
+
+  const handleAgregarAdminPorCorreo = async () => {
+    const clean = nuevoEmailAdmin.toLowerCase().trim();
+    if (!clean) return;
+    if (!clean.includes('@') || !clean.includes('.')) {
+      alert('Por favor ingresa un correo electrónico válido');
+      return;
+    }
+    const yaEsAdmin = adminEmails
+      ? adminEmails.some((e) => e.toLowerCase().trim() === clean)
+      : esAdminEmail(clean, adminEmails);
+    if (yaEsAdmin) {
+      alert(`El correo ${clean} ya cuenta con permisos de Administrador.`);
+      return;
+    }
+    try {
+      setProcesandoAutorizacion(true);
+      if (onToggleAdminMember) {
+        await onToggleAdminMember(clean, true);
+        setNuevoEmailAdmin('');
+      }
+    } finally {
+      setProcesandoAutorizacion(false);
+    }
+  };
 
   // Auto-scroll al final del chat cuando llegan nuevos mensajes
   useEffect(() => {
@@ -66,11 +127,11 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     const list: Miembro[] = [];
     const emails = new Set<string>();
 
-    // Benjamín Chávez garantizado como Admin
+    // Benjamín Chávez garantizado como Administrador Principal
     const benjaEnLista = miembros.find(
-      (m) => m.email?.toLowerCase() === 'benja.chavez34@gmail.com'
+      (m) => m.email?.toLowerCase() === SUPER_ADMIN_EMAIL
     );
-    const isMeBenja = emailActual?.toLowerCase() === 'benja.chavez34@gmail.com';
+    const isMeBenja = emailActual?.toLowerCase() === SUPER_ADMIN_EMAIL;
     const benjaNombre = isMeBenja && nombreActual ? nombreActual : (benjaEnLista?.nombre || 'Benjamín Chávez');
     const benjaAvatar = (isMeBenja && avatarIdActual) || benjaEnLista?.avatarId || 'gorilla';
     const benjaTel = (isMeBenja && telefonoActual !== undefined) ? telefonoActual : (benjaEnLista?.telefono || '+56 9 8765 4321');
@@ -80,7 +141,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     list.push({
       id: benjaEnLista?.id || 'admin-benja',
       nombre: benjaNombre,
-      email: 'benja.chavez34@gmail.com',
+      email: SUPER_ADMIN_EMAIL,
       rol: benjaRol,
       telefono: benjaTel,
       sucursal: benjaSucursal,
@@ -88,9 +149,9 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       isAdmin: true,
       estado: 'disponible',
     });
-    emails.add('benja.chavez34@gmail.com');
+    emails.add(SUPER_ADMIN_EMAIL);
 
-    // Francisco Inzunza garantizado como Admin
+    // Francisco Inzunza garantizado en la lista con verificación dinámica de rol Admin
     const fcoEnLista = miembros.find(
       (m) => m.email?.toLowerCase() === 'fco.inzunza.re@gmail.com'
     );
@@ -99,7 +160,12 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     const fcoAvatar = (isMeFco && avatarIdActual) || fcoEnLista?.avatarId || 'gorilla';
     const fcoTel = (isMeFco && telefonoActual !== undefined) ? telefonoActual : (fcoEnLista?.telefono || '');
     const fcoSucursal = (isMeFco && sucursalActual) || fcoEnLista?.sucursal || 'Casa Central - Santiago';
-    const fcoRol = (isMeFco && rolActual) || fcoEnLista?.rol || 'Administrador General & Socio';
+    
+    // Nivel de autorización dinámico según adminEmails
+    const fcoIsAdmin = adminEmails
+      ? adminEmails.some((e) => e.toLowerCase().trim() === 'fco.inzunza.re@gmail.com')
+      : (fcoEnLista ? !!fcoEnLista.isAdmin : true);
+    const fcoRol = (isMeFco && rolActual) || fcoEnLista?.rol || (fcoIsAdmin ? 'Administrador General & Socio' : 'Vendedor & Socio');
 
     list.push({
       id: fcoEnLista?.id || 'admin-fco',
@@ -109,15 +175,21 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       telefono: fcoTel,
       sucursal: fcoSucursal,
       avatarId: fcoAvatar,
-      isAdmin: true,
+      isAdmin: fcoIsAdmin,
       estado: 'disponible',
     });
     emails.add('fco.inzunza.re@gmail.com');
 
-    // Agregar el resto de miembros
+    // Agregar el resto de miembros con autorización dinámica
     miembros.forEach((m) => {
       if (m.email && !emails.has(m.email.toLowerCase())) {
         const isCurrent = m.email.toLowerCase() === emailActual?.toLowerCase();
+        const isMemberAdmin = m.email.toLowerCase().trim() === SUPER_ADMIN_EMAIL
+          ? true
+          : adminEmails
+          ? adminEmails.some((e) => e.toLowerCase().trim() === m.email.toLowerCase().trim())
+          : !!m.isAdmin;
+
         list.push({
           ...m,
           nombre: isCurrent && nombreActual ? nombreActual : m.nombre,
@@ -125,6 +197,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
           telefono: isCurrent && telefonoActual !== undefined ? telefonoActual : m.telefono,
           rol: isCurrent && rolActual ? rolActual : m.rol,
           sucursal: isCurrent && sucursalActual ? sucursalActual : m.sucursal,
+          isAdmin: isMemberAdmin,
         });
         emails.add(m.email.toLowerCase());
       }
@@ -132,15 +205,21 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
 
     // Si el usuario actual no está registrado aún, agregarlo
     if (emailActual && !emails.has(emailActual.toLowerCase())) {
+      const isCurrAdmin = isMeSuperAdmin
+        ? true
+        : adminEmails
+        ? adminEmails.some((e) => e.toLowerCase().trim() === emailActual.toLowerCase().trim())
+        : isAdmin;
+
       list.push({
         id: 'curr-user',
-        nombre: nombreActual || 'Vendedor',
+        nombre: nombreActual || (isCurrAdmin ? 'Administrador' : 'Vendedor'),
         email: emailActual,
-        rol: rolActual || 'Vendedor',
+        rol: rolActual || (isCurrAdmin ? 'Administrador' : 'Vendedor'),
         telefono: '',
         sucursal: 'Ruta Comercial',
-        avatarId: avatarIdActual || 'avatar2',
-        isAdmin,
+        avatarId: avatarIdActual || (isCurrAdmin ? 'gorilla' : 'avatar2'),
+        isAdmin: isCurrAdmin,
         estado: 'disponible',
       });
     }
@@ -155,7 +234,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
         m.sucursal.toLowerCase().includes(q) ||
         m.telefono.includes(q)
     );
-  }, [miembros, emailActual, nombreActual, rolActual, avatarIdActual, isAdmin, filtroTexto]);
+  }, [miembros, emailActual, nombreActual, rolActual, avatarIdActual, isAdmin, isMeSuperAdmin, adminEmails, filtroTexto]);
 
   const handleEnviar = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -221,6 +300,64 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       {/* ========================================================= */}
       {subVista === 'miembros' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* BANNER DE AUTORIZACIÓN EXCLUSIVO BENJAMÍN CHÁVEZ */}
+          {isMeSuperAdmin && (
+            <div
+              className="card"
+              style={{
+                padding: '12px 16px',
+                margin: 0,
+                background: 'linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(6,182,212,0.06) 100%)',
+                border: '1.5px solid var(--accent)',
+                borderRadius: 14,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 260 }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.96rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    👑 <span>Gestión de Autorizaciones & Administradores</span>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        background: 'var(--accent)',
+                        color: '#fff',
+                        padding: '2px 8px',
+                        borderRadius: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Exclusivo Benjamín Chávez
+                    </span>
+                  </div>
+                  <div className="sub" style={{ fontSize: '0.80rem', marginTop: 4 }}>
+                    Como <b>Administrador Principal</b>, puedes otorgar o revocar permisos de administración a cualquier miembro del equipo.
+                    Los miembros con nivel <b>Administrador</b> tienen acceso a Caja, Arqueos, Finanzas, BI, Costos y Supervisión.
+                  </div>
+                </div>
+
+                {/* Pre-autorizar nuevo correo */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%', maxWidth: 380 }}>
+                  <input
+                    type="email"
+                    placeholder="correo@ejemplo.com"
+                    value={nuevoEmailAdmin}
+                    onChange={(e) => setNuevoEmailAdmin(e.target.value)}
+                    style={{ fontSize: '0.82rem', padding: '6px 10px', flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ fontSize: '0.80rem', padding: '6px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}
+                    onClick={handleAgregarAdminPorCorreo}
+                    disabled={procesandoAutorizacion}
+                  >
+                    🛡️ Dar Admin
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* BUSCADOR DE MIEMBROS */}
           <div className="card" style={{ padding: '8px 12px' }}>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -248,12 +385,13 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))',
               gap: 10,
             }}
           >
             {listaMiembros.map((m) => {
-              const esAdminCard = m.isAdmin || esAdminEmail(m.email);
+              const isCardSuperAdmin = m.email?.toLowerCase().trim() === SUPER_ADMIN_EMAIL;
+              const esAdminCard = isCardSuperAdmin || (adminEmails ? adminEmails.some((e) => e.toLowerCase().trim() === m.email?.toLowerCase().trim()) : (m.isAdmin || esAdminEmail(m.email, adminEmails)));
               const telClean = (m.telefono || '').replace(/[^0-9+]/g, '');
 
               return (
@@ -266,10 +404,16 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
-                    gap: 12,
-                    border: esAdminCard ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-                    background: esAdminCard
-                      ? 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.04) 100%)'
+                    gap: 10,
+                    border: isCardSuperAdmin
+                      ? '1.8px solid #f59e0b'
+                      : esAdminCard
+                      ? '1.5px solid var(--accent)'
+                      : '1px solid var(--border)',
+                    background: isCardSuperAdmin
+                      ? 'linear-gradient(135deg, var(--card) 0%, rgba(245,158,11,0.06) 100%)'
+                      : esAdminCard
+                      ? 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.05) 100%)'
                       : 'var(--card)',
                   }}
                 >
@@ -283,8 +427,16 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                         height: 50,
                         borderRadius: '50%',
                         objectFit: 'cover',
-                        border: esAdminCard ? '2px solid var(--accent)' : '1.5px solid var(--border)',
-                        boxShadow: esAdminCard ? '0 0 10px rgba(37,99,235,0.35)' : 'none',
+                        border: isCardSuperAdmin
+                          ? '2.5px solid #f59e0b'
+                          : esAdminCard
+                          ? '2px solid var(--accent)'
+                          : '1.5px solid var(--border)',
+                        boxShadow: isCardSuperAdmin
+                          ? '0 0 12px rgba(245,158,11,0.45)'
+                          : esAdminCard
+                          ? '0 0 10px rgba(37,99,235,0.35)'
+                          : 'none',
                         flexShrink: 0,
                       }}
                       referrerPolicy="no-referrer"
@@ -293,7 +445,21 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 800, fontSize: '0.98rem' }}>{m.nombre}</span>
-                        {esAdminCard ? (
+                        {isCardSuperAdmin ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              fontWeight: 900,
+                              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                              color: '#fff',
+                              padding: '1px 7px',
+                              borderRadius: 4,
+                              letterSpacing: '0.5px',
+                            }}
+                          >
+                            👑 SUPER ADMIN
+                          </span>
+                        ) : esAdminCard ? (
                           <span
                             style={{
                               fontSize: '0.65rem',
@@ -305,7 +471,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                               letterSpacing: '0.5px',
                             }}
                           >
-                            👑 ADMIN
+                            🛡️ ADMIN
                           </span>
                         ) : (
                           <span
@@ -319,20 +485,102 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                               borderRadius: 4,
                             }}
                           >
-                            MIEMBRO
+                            👤 VENDEDOR
                           </span>
                         )}
                       </div>
 
                       <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>
-                        {m.rol || (esAdminCard ? 'Administrador' : 'Vendedor')}
+                        {m.rol || (isCardSuperAdmin ? 'Administrador Principal' : esAdminCard ? 'Administrador' : 'Vendedor')}
                       </div>
 
-                      <div className="sub" style={{ fontSize: '0.75rem', marginTop: 3 }}>
+                      <div className="sub" style={{ fontSize: '0.74rem', marginTop: 2 }}>
+                        ✉️ {m.email}
+                      </div>
+
+                      <div className="sub" style={{ fontSize: '0.74rem', marginTop: 1 }}>
                         📍 {m.sucursal || 'Casa Central'}
                       </div>
                     </div>
                   </div>
+
+                  {/* PANEL DE GESTIÓN DE AUTORIZACIÓN: EXCLUSIVO BENJAMÍN CHÁVEZ */}
+                  {isMeSuperAdmin && (
+                    <div style={{ marginTop: 2, marginBottom: 2 }}>
+                      {isCardSuperAdmin ? (
+                        <div
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(234, 179, 8, 0.08)',
+                            border: '1px solid rgba(234, 179, 8, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 6,
+                          }}
+                        >
+                          <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            👑 Propietario & Titular
+                          </span>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 600 }}>
+                            🔒 Seguridad Permanente
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            background: esAdminCard ? 'rgba(37,99,235,0.08)' : 'rgba(0,0,0,0.03)',
+                            border: `1px solid ${esAdminCard ? 'rgba(37,99,235,0.25)' : 'var(--border)'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 130 }}>
+                            <div
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 800,
+                                color: esAdminCard ? 'var(--accent)' : 'var(--muted)',
+                              }}
+                            >
+                              {esAdminCard ? '🛡️ NIVEL: ADMINISTRADOR' : '👤 NIVEL: VENDEDOR'}
+                            </div>
+                            <div style={{ fontSize: '0.70rem', color: 'var(--muted)' }}>
+                              {esAdminCard
+                                ? 'Acceso total a finanzas, caja y costos'
+                                : 'Funciones de gerencia y finanzas ocultas'}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className={esAdminCard ? 'btn-ghost' : 'btn-primary'}
+                            style={{
+                              fontSize: '0.74rem',
+                              padding: '5px 12px',
+                              fontWeight: 700,
+                              borderRadius: 8,
+                              color: esAdminCard ? '#ef4444' : undefined,
+                              borderColor: esAdminCard ? 'rgba(239, 68, 68, 0.4)' : undefined,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            onClick={() => handleConfirmToggleAdmin(m.email, !esAdminCard, m.nombre)}
+                            disabled={procesandoAutorizacion}
+                          >
+                            {esAdminCard ? '✕ Quitar Admin' : '👑 Hacer Admin'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Contacto & Acciones Rápidas */}
                   <div
@@ -503,7 +751,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             ) : (
               mensajes.map((msg, idx) => {
                 const esMio = msg.deEmail?.toLowerCase() === emailActual.toLowerCase();
-                const esAdminMsg = msg.esAdmin || esAdminEmail(msg.deEmail);
+                const esAdminMsg = msg.esAdmin || esAdminEmail(msg.deEmail, adminEmails);
                 const esUrgente = msg.tipo === 'urgente';
                 const esIndicacion = msg.tipo === 'indicacion';
 
