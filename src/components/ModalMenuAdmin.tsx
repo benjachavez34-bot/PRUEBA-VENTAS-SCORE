@@ -159,7 +159,7 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {/* CAJA & RESUMEN */}
+              {/* CENTRO FINANCIERO: CAJA & ARQUEO */}
               <button
                 type="button"
                 className="btn-ghost"
@@ -188,17 +188,17 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                   <span style={{ fontSize: '1.35rem' }}>💰</span>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>
-                      Caja & Cierres (Resumen T0)
+                      Caja, Turno & Arqueo Ciego
                     </div>
                     <div className="sub" style={{ fontSize: '0.75rem' }}>
-                      Arqueo ciego, dinero en cuenta y consolidado del turno
+                      Dinero en cuenta, ingresos del turno y consolidado de caja
                     </div>
                   </div>
                 </div>
                 <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>→</span>
               </button>
 
-              {/* ESTADÍSTICAS & BI */}
+              {/* CENTRO FINANCIERO: BI & ESTADÍSTICAS */}
               <button
                 type="button"
                 className="btn-ghost"
@@ -230,7 +230,7 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                       Inteligencia BI & Estadísticas
                     </div>
                     <div className="sub" style={{ fontSize: '0.75rem' }}>
-                      Horarios punta, rentabilidad, auditoría y libro Excel
+                      Métricas predictivas, horarios punta, rentabilidad y Excel
                     </div>
                   </div>
                 </div>

@@ -56,6 +56,7 @@ import {
   generarMensajeWhatsAppCierre,
 } from './utils/formatters';
 import { EstadisticasView } from './components/EstadisticasView';
+import { CentroFinancieroView } from './components/CentroFinancieroView';
 import { AdminVendedoresView } from './components/AdminVendedoresView';
 import { MiembrosChatView } from './components/MiembrosChatView';
 import { AyudaView } from './components/AyudaView';
@@ -3931,7 +3932,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               <span>☰ {isAdmin ? 'Administración' : 'Más'}</span>
               {['resumen', 'estadisticas', 'equipo', 'configuracion', 'ayuda'].includes(activeTab) && (
                 <span style={{ fontSize: '0.72rem', opacity: 0.85 }}>
-                  ({activeTab === 'resumen' ? 'Caja' : activeTab === 'estadisticas' ? 'BI' : activeTab === 'equipo' ? 'Equipo' : activeTab === 'configuracion' ? 'Config' : 'IA'})
+                  ({activeTab === 'resumen' || activeTab === 'estadisticas' ? 'Finanzas' : activeTab === 'equipo' ? 'Equipo' : activeTab === 'configuracion' ? 'Config' : 'IA'})
                 </span>
               )}
             </div>
@@ -3972,10 +3973,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                 </button>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase' }}>
-                    {activeTab === 'resumen'
-                      ? '💰 Caja & Cierres'
-                      : activeTab === 'estadisticas'
-                      ? '📊 Estadísticas BI'
+                    {activeTab === 'resumen' || activeTab === 'estadisticas'
+                      ? '🏛️ Centro Financiero & BI'
                       : activeTab === 'equipo'
                       ? '🏢 Supervisión'
                       : activeTab === 'configuracion'
@@ -5142,285 +5141,25 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
               </section>
             )}
 
-            {/* VIEW RESUMEN (SOLO ADMINISTRADORES) */}
-            {isAdmin && activeTab === 'resumen' && (
-              <section id="viewResumen">
-                <div className="card" id="resPeriodo">
-                  <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Período actual: {desdeTxt} → hoy
-                  </div>
-                  <div className="item">
-                    <span>Compras del período (inversión)</span>
-                    <span className="amount">{fmt(resumenPeriodo.inv)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Ventas del período ({resumenPeriodo.ventas})</span>
-                    <span className="amount">{fmt(resumenPeriodo.vend)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Cobrado al contado</span>
-                    <span className="amount">{fmt(resumenPeriodo.ventasPag)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Pagos recibidos de deudores</span>
-                    <span className="amount">{fmt(resumenPeriodo.pagos)}</span>
-                  </div>
-                  <div className="item">
-                    <span>
-                      <b>Total ingresado</b>
-                    </span>
-                    <span className="amount ok">{fmt(resumenPeriodo.ingresado)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Costo de lo vendido</span>
-                    <span className="amount">{fmt(resumenPeriodo.costoV)}</span>
-                  </div>
-                  {Boolean(resumenPeriodo.costoMerma && resumenPeriodo.costoMerma > 0) && (
-                    <div className="item" style={{ color: '#ea580c' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>⚠️ Pérdida por mermas/roturas ({resumenPeriodo.mermasCant} u.)</span>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          style={{ fontSize: '0.72rem', padding: '1px 6px' }}
-                          onClick={() => setModalHistorialMermas(true)}
-                        >
-                          Ver detalle
-                        </button>
-                      </span>
-                      <span className="amount debt">-{fmt(resumenPeriodo.costoMerma || 0)}</span>
-                    </div>
-                  )}
-                  <div className="item">
-                    <span>
-                      <b>Ganancia del período</b>
-                    </span>
-                    <span
-                      className={`amount ${
-                        resumenPeriodo.ganancia >= 0 ? 'ok' : 'debt'
-                      }`}
-                    >
-                      {fmt(resumenPeriodo.ganancia)}
-                    </span>
-                  </div>
-                  <div className="row">
-                    <button className="btn-primary" onClick={handleOpenCerrarCaja}>
-                      🔒 Cerrar caja y generar consolidado
-                    </button>
-                  </div>
-                </div>
-
-                <div className="card" id="resAcum">
-                  <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Acumulado total (no se reinicia al cerrar caja)
-                  </div>
-                  <div className="item">
-                    <span>Inversión total (compras)</span>
-                    <span className="amount">{fmt(resumenTotal.inv)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Total ingresado</span>
-                    <span className="amount ok">{fmt(resumenTotal.ingresado)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Falta recuperar de la inversión</span>
-                    <span className="amount debt">
-                      {fmt(Math.max(0, resumenTotal.inv - resumenTotal.ingresado))}
-                    </span>
-                  </div>
-                  <div className="item">
-                    <span>Ganancia ya cobrada</span>
-                    <span className="amount ok">
-                      {fmt(Math.max(0, resumenTotal.ingresado - resumenTotal.inv))}
-                    </span>
-                  </div>
-                  <div className="item">
-                    <span>
-                      <b>Dinero que deberías tener en la cuenta</b>
-                    </span>
-                    <span className={`amount ${cta >= 0 ? 'ok' : 'debt'}`}>
-                      {fmt(cta)}
-                    </span>
-                  </div>
-                  <div className="item">
-                    <span>Te deben (deudores)</span>
-                    <span className="amount debt">{fmt(pc)}</span>
-                  </div>
-                  <div className="item">
-                    <span>Cuando cobres todo, tendrías</span>
-                    <span className="amount ok">{fmt(cta + pc)}</span>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Por producto (período actual)
-                  </div>
-                  <div id="resProd">
-                    {productos.length ? (
-                      productos.map((p) => {
-                        const x = resumenPeriodo.porP[p.id] || {
-                          inv: 0,
-                          vend: 0,
-                          costo: 0,
-                        };
-                        const g = x.vend - x.costo;
-                        return (
-                          <div className="item" key={p.id}>
-                            <div>
-                              <div className="name">{p.nombre}</div>
-                              <div className="sub">
-                                Compras {fmt(x.inv)} · Vendido {fmt(x.vend)} · Costo
-                                de lo vendido {fmt(x.costo)}
-                              </div>
-                            </div>
-                            <div className={`amount ${g >= 0 ? 'ok' : 'debt'}`}>
-                              {fmt(g)}
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="empty">Sin productos</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Pagos de deudores (período actual)
-                  </div>
-                  <div id="resPagos">
-                    {pagosPeriodo.length ? (
-                      pagosPeriodo.map((m) => (
-                        <div className="item" key={m.id || m.ts}>
-                          <div>
-                            <div className="name">{m.cliente}</div>
-                            <div className="sub">{m.fecha || ''}</div>
-                          </div>
-                          <div className="amount ok">{fmt(m.total || 0)}</div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty">Aún no hay pagos</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Cierres de caja anteriores
-                  </div>
-                  <div id="resCierres">
-                    {cierres.length ? (
-                      cierres.map((c) => (
-                        <div
-                          className="item"
-                          key={c.id || c.hasta}
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => setModalDetalleCierre({ isOpen: true, cierre: c })}
-                        >
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <span className="name">{c.nombre}</span>
-                              {c.estadoArqueo ? (
-                                <span
-                                  style={{
-                                    fontSize: '0.72rem',
-                                    fontWeight: 700,
-                                    padding: '2px 8px',
-                                    borderRadius: 12,
-                                    background:
-                                      c.estadoArqueo === 'cuadrada'
-                                        ? 'rgba(34, 197, 94, 0.15)'
-                                        : c.estadoArqueo === 'sobrante'
-                                        ? 'rgba(234, 179, 8, 0.15)'
-                                        : 'rgba(239, 68, 68, 0.15)',
-                                    color:
-                                      c.estadoArqueo === 'cuadrada'
-                                        ? '#22c55e'
-                                        : c.estadoArqueo === 'sobrante'
-                                        ? '#eab308'
-                                        : '#ef4444',
-                                    border: `1px solid ${
-                                      c.estadoArqueo === 'cuadrada'
-                                        ? 'rgba(34, 197, 94, 0.3)'
-                                        : c.estadoArqueo === 'sobrante'
-                                        ? 'rgba(234, 179, 8, 0.3)'
-                                        : 'rgba(239, 68, 68, 0.3)'
-                                    }`,
-                                  }}
-                                >
-                                  {c.estadoArqueo === 'cuadrada'
-                                    ? '🟢 Cuadrada ($0)'
-                                    : c.estadoArqueo === 'sobrante'
-                                    ? `🟡 Sobrante (+${fmt(c.diferenciaTotal || 0)})`
-                                    : `🔴 Faltante (-${fmt(Math.abs(c.diferenciaTotal || 0))})`}
-                                </span>
-                              ) : null}
-                              {c.por ? (
-                                <span className="sub" style={{ fontSize: '0.75rem' }}>
-                                  • Por {c.por}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="sub">
-                              {c.desdeTxt} → {c.hastaTxt}
-                            </div>
-                            <div className="sub">
-                              Ventas {fmt(c.vend)} ({c.ventas}) · Ingresado{' '}
-                              {fmt(c.ingresado)} · Compras {fmt(c.inv)}
-                            </div>
-                            <div className="sub">
-                              Te debían {fmt(c.porCobrar)} · En cuenta {fmt(c.enCuenta)}
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                            <div
-                              className={`amount ${c.ganancia >= 0 ? 'ok' : 'debt'}`}
-                            >
-                              {fmt(c.ganancia)}
-                            </div>
-                            <button
-                              type="button"
-                              className="btn-ghost"
-                              style={{ fontSize: '0.78rem', padding: '4px 8px' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setModalDetalleCierre({ isOpen: true, cierre: c });
-                              }}
-                            >
-                              📋 Arqueo
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty">Aún no has cerrado ninguna caja</div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="sub" style={{ marginBottom: 8 }}>
-                    Borra ventas, productos, deudas y cierres para empezar desde
-                    cero. Exporta a Excel antes si quieres guardar una copia.
-                  </div>
-                  <button className="btn-red" onClick={handleOpenBorrarTodo}>
-                    🗑 Eliminar todo el registro
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {/* VIEW ESTADISTICAS (SOLO ADMINISTRADORES) */}
-            {isAdmin && activeTab === 'estadisticas' && (
-              <section id="viewEstadisticas">
-                <EstadisticasView
-                  movs={movs}
+            {/* CENTRO FINANCIERO & BI UNIFICADO (FASE C) */}
+            {isAdmin && (activeTab === 'resumen' || activeTab === 'estadisticas') && (
+              <section id="viewCentroFinanciero">
+                <CentroFinancieroView
+                  initialSubTab={activeTab === 'estadisticas' ? 'bi' : 'caja'}
+                  desdeTxt={desdeTxt}
+                  resumenPeriodo={resumenPeriodo}
+                  resumenTotal={resumenTotal}
+                  cta={cta}
+                  pc={pc}
                   productos={productos}
+                  movs={movs}
+                  pagosPeriodo={pagosPeriodo}
                   cierres={cierres}
-                  onVerDetalleCierre={(cierre) => setModalDetalleCierre({ isOpen: true, cierre })}
+                  handleOpenCerrarCaja={handleOpenCerrarCaja}
+                  setModalDetalleCierre={setModalDetalleCierre}
+                  setModalHistorialMermas={setModalHistorialMermas}
+                  handleOpenBorrarTodo={handleOpenBorrarTodo}
+                  onVolverPos={() => setActiveTab('venta')}
                 />
               </section>
             )}
