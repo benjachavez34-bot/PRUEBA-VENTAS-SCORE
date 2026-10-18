@@ -681,5 +681,62 @@ button:active {
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
+/* GESTIÓN DE INVENTARIO & STOCK (FASE E) */
+.inventario-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.inventario-card:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.inventario-card.agotado {
+  border-left: 4px solid #ef4444;
+}
+
+.inventario-card.bajo-stock {
+  border-left: 4px solid #f59e0b;
+}
+
+.inventario-card.en-stock {
+  border-left: 4px solid #10b981;
+}
+
+.badge-stock {
+  font-size: 0.70rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-stock.agotado {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.badge-stock.bajo-stock {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.badge-stock.en-stock {
+  background: rgba(16, 185, 129, 0.18);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+
 
 
