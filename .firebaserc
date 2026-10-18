@@ -1,8 +1,0 @@
-{
-  "projects": {
-    "production": "ventas-score",
-    "default": "ventas-score"
-  },
-  "targets": {},
-  "etags": {}
-}

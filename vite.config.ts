@@ -2,14 +2,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const repository = process.env.GITHUB_REPOSITORY?.split('/')[1];
-
-const base =
-  process.env.DEPLOY_TARGET === 'firebase'
-    ? '/'
-    : process.env.DEPLOY_TARGET === 'github'
-      ? `/${repository || 'PRUEBA-VENTAS-SCORE'}/`
-      : './';
+// En GitHub Actions, GITHUB_REPOSITORY contiene "propietario/nombre-repositorio".
+// Esto asigna la base al nombre exacto del repositorio (ej. "/ventas-score/" o el repositorio de prueba),
+// evitando páginas en blanco por rutas absolutas /assets/... no encontradas en GitHub Pages.
+const base = process.env.GITHUB_REPOSITORY
+  ? `/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
+  : process.env.BASE_PATH || './';
 
 export default defineConfig({
   plugins: [react()],
