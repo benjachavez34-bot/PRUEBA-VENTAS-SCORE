@@ -828,13 +828,25 @@ export default function App() {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const newMsg = change.doc.data() as MensajeChat;
-            const isFromOther = Boolean(newMsg && newMsg.deEmail?.toLowerCase() !== user?.email?.toLowerCase());
+            const myEmail = (user?.email || perfil.email || '').toLowerCase().trim();
+            const msgSender = (newMsg.deEmail || '').toLowerCase().trim();
+            const msgRecipient = (newMsg.paraEmail || '').toLowerCase().trim();
+
+            const isFromOther = Boolean(msgSender && msgSender !== myEmail);
+            // Mostrar notificación solo si es chat general o si va dirigido a mi correo
+            const isForMe = !msgRecipient || msgRecipient === myEmail;
             const isRecent = Date.now() - (newMsg.ts || 0) < 45000;
-            if (isFromOther && isRecent) {
+
+            if (isFromOther && isForMe && isRecent) {
+              const isDirect = Boolean(msgRecipient && msgRecipient === myEmail);
+              const notifLabel = isDirect
+                ? `🔒 ${newMsg.deNombre || 'Compañero'} (Directo)`
+                : (newMsg.deNombre || 'Compañero');
+
               // 1. Mostrar banner flotante en la pantalla (visible en iPhone, Android y Desktop)
               setInAppBanner({
                 id: newMsg.id || String(Date.now()),
-                deNombre: newMsg.deNombre || 'Compañero',
+                deNombre: notifLabel,
                 texto: newMsg.texto || '',
                 avatarId: newMsg.avatarId,
               });
@@ -847,7 +859,7 @@ export default function App() {
 
               // 3. Reproducir sonido y disparar notificación web/sistema
               showBrowserNotification(
-                `💬 ${newMsg.deNombre || 'Compañero'}:`,
+                `💬 ${notifLabel}:`,
                 newMsg.texto || 'Nuevo mensaje en Ventas Score'
               );
             }
@@ -2910,8 +2922,16 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
 
   const handleEnviarMensaje = async (
     texto: string,
-    tipo: 'general' | 'indicacion' | 'urgente' = 'general'
+    tipo: 'general' | 'indicacion' | 'urgente' = 'general',
+    paraEmail?: string,
+    paraNombre?: string
   ) => {
+    const cleanParaEmail = paraEmail ? paraEmail.toLowerCase().trim() : undefined;
+    const myEmail = (user?.email || (isGuest ? 'invitado@local' : perfil.email || '')).toLowerCase().trim();
+    const canalId = cleanParaEmail
+      ? 'dm_' + [myEmail, cleanParaEmail].sort().join('__')
+      : 'general';
+
     const msgData: Omit<MensajeChat, 'id'> = {
       deEmail: user?.email || (isGuest ? 'invitado@local' : perfil.email || ''),
       deNombre: perfil.nombre || miNombre,
@@ -2921,6 +2941,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       texto,
       ts: Date.now(),
       tipo,
+      ...(cleanParaEmail ? { paraEmail: cleanParaEmail, paraNombre, canalId } : { canalId: 'general' }),
     };
 
     if (isGuest) {
@@ -2932,7 +2953,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         } catch {}
         return updated;
       });
-      showToast('Mensaje enviado (modo local)');
+      showToast(cleanParaEmail ? `Mensaje directo enviado a ${paraNombre || cleanParaEmail}` : 'Mensaje enviado (modo local)');
       return;
     }
 
@@ -2940,12 +2961,20 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       await addDoc(collection(db, 'mensajes'), msgData);
       // Encolar notificación push para teléfonos con la app cerrada
       registrarPushParaDispositivos(
-        `💬 ${perfil.nombre || miNombre}:`,
+        cleanParaEmail
+          ? `🔒 ${perfil.nombre || miNombre} (Directo):`
+          : `📢 ${perfil.nombre || miNombre}:`,
         msgData.texto,
-        user?.uid,
-        user?.email || perfil.email
+        undefined,
+        cleanParaEmail || undefined
       );
-      showToast(isAdmin ? 'Indicación oficial enviada al equipo' : 'Mensaje enviado');
+      showToast(
+        cleanParaEmail
+          ? `✓ Mensaje directo enviado a ${paraNombre || cleanParaEmail}`
+          : isAdmin
+          ? 'Indicación oficial enviada al equipo'
+          : 'Mensaje enviado'
+      );
     } catch (e: any) {
       alert('No se pudo enviar el mensaje: ' + (e?.message || e));
     }

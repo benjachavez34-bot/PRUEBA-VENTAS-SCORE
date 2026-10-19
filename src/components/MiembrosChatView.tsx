@@ -17,7 +17,12 @@ interface MiembrosChatViewProps {
   isSuperAdmin?: boolean;
   adminEmails?: string[];
   onToggleAdminMember?: (email: string, makeAdmin: boolean) => Promise<void>;
-  onEnviarMensaje: (texto: string, tipo: 'general' | 'indicacion' | 'urgente') => Promise<void>;
+  onEnviarMensaje: (
+    texto: string,
+    tipo?: 'general' | 'indicacion' | 'urgente',
+    paraEmail?: string,
+    paraNombre?: string
+  ) => Promise<void>;
   onOpenMiCuenta: () => void;
 }
 
@@ -55,6 +60,22 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   onOpenMiCuenta,
 }) => {
   const [subVista, setSubVista] = useState<'miembros' | 'chat'>('miembros');
+  const [activeChatChannel, setActiveChatChannel] = useState<string>('general');
+  const [chatsIniciados, setChatsIniciados] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('chats_directos_iniciados');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('chats_directos_iniciados', JSON.stringify(chatsIniciados));
+    } catch {}
+  }, [chatsIniciados]);
+
   const [nuevoMensaje, setNuevoMensaje] = useState<string>('');
   const [tipoMensaje, setTipoMensaje] = useState<'general' | 'indicacion' | 'urgente'>('general');
   const [enviando, setEnviando] = useState<boolean>(false);
@@ -114,13 +135,6 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       setProcesandoAutorizacion(false);
     }
   };
-
-  // Auto-scroll al final del chat cuando llegan nuevos mensajes
-  useEffect(() => {
-    if (subVista === 'chat') {
-      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [mensajes, subVista]);
 
   // Lista de miembros combinada (siempre garantiza a Benjamín y los demás)
   const listaMiembros = React.useMemo(() => {
@@ -236,13 +250,139 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     );
   }, [miembros, emailActual, nombreActual, rolActual, avatarIdActual, isAdmin, isMeSuperAdmin, adminEmails, filtroTexto]);
 
+  const myEmail = (emailActual || '').toLowerCase().trim();
+
+  // Lista de correos que tienen chat directo activo
+  const directChatEmails = React.useMemo(() => {
+    const set = new Set<string>();
+
+    // 1. Iniciados explícitamente desde el banner al hacer clic en 'Mensaje'
+    chatsIniciados.forEach((e) => {
+      const clean = e.toLowerCase().trim();
+      if (clean && clean !== myEmail) {
+        set.add(clean);
+      }
+    });
+
+    // 2. Historial de mensajes directos que involucran al usuario actual
+    mensajes.forEach((msg) => {
+      const de = (msg.deEmail || '').toLowerCase().trim();
+      const para = (msg.paraEmail || '').toLowerCase().trim();
+      if (para && para === myEmail && de && de !== myEmail) {
+        set.add(de);
+      } else if (de && de === myEmail && para && para !== myEmail) {
+        set.add(para);
+      }
+    });
+
+    return Array.from(set);
+  }, [chatsIniciados, mensajes, myEmail]);
+
+  // Miembros de los chats directos activos
+  const activeDmMembers = React.useMemo(() => {
+    return directChatEmails.map((email) => {
+      const found = listaMiembros.find((m) => m.email?.toLowerCase().trim() === email);
+      if (found) return found;
+      return {
+        id: `dm-${email}`,
+        nombre: email.split('@')[0],
+        email: email,
+        rol: 'Miembro del Equipo',
+        telefono: '',
+        sucursal: 'Ventas',
+        avatarId: 'avatar2',
+        isAdmin: false,
+        estado: 'disponible' as const,
+      };
+    });
+  }, [directChatEmails, listaMiembros]);
+
+  const isDirectChat = activeChatChannel !== 'general';
+  const targetDmEmail = isDirectChat ? activeChatChannel : null;
+  const targetDmMember = isDirectChat
+    ? activeDmMembers.find((m) => m.email?.toLowerCase().trim() === targetDmEmail) || null
+    : null;
+
+  // Filtrado de mensajes según canal activo
+  const mensajesFiltrados = React.useMemo(() => {
+    if (!isDirectChat) {
+      // Chat General & Anuncios: solo mensajes públicos / sin destinatario específico
+      return mensajes.filter((m) => !m.paraEmail || m.canalId === 'general');
+    }
+
+    const expectedCanalId = 'dm_' + [myEmail, targetDmEmail!].sort().join('__');
+    return mensajes.filter((m) => {
+      if (m.canalId === expectedCanalId) return true;
+      const de = (m.deEmail || '').toLowerCase().trim();
+      const para = (m.paraEmail || '').toLowerCase().trim();
+      return (de === myEmail && para === targetDmEmail) || (de === targetDmEmail && para === myEmail);
+    });
+  }, [mensajes, isDirectChat, targetDmEmail, myEmail]);
+
+  const countMensajesGenerales = React.useMemo(() => {
+    return mensajes.filter((m) => !m.paraEmail || m.canalId === 'general').length;
+  }, [mensajes]);
+
+  const countMensajesDirectos = (email: string) => {
+    const clean = email.toLowerCase().trim();
+    const expectedCanalId = 'dm_' + [myEmail, clean].sort().join('__');
+    return mensajes.filter((m) => {
+      if (m.canalId === expectedCanalId) return true;
+      const de = (m.deEmail || '').toLowerCase().trim();
+      const para = (m.paraEmail || '').toLowerCase().trim();
+      return (de === myEmail && para === clean) || (de === clean && para === myEmail);
+    }).length;
+  };
+
+  const handleIniciarChatDirecto = (targetMemberEmail?: string) => {
+    if (!targetMemberEmail) return;
+    const clean = targetMemberEmail.toLowerCase().trim();
+    if (!clean || clean === myEmail) return;
+
+    setChatsIniciados((prev) => {
+      if (!prev.map((e) => e.toLowerCase().trim()).includes(clean)) {
+        return [...prev, clean];
+      }
+      return prev;
+    });
+
+    setActiveChatChannel(clean);
+    setSubVista('chat');
+    setNuevoMensaje('');
+  };
+
+  const handleCerrarChatDirecto = (emailToClose: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const clean = emailToClose.toLowerCase().trim();
+    setChatsIniciados((prev) => prev.filter((em) => em.toLowerCase().trim() !== clean));
+    if (activeChatChannel === clean) {
+      setActiveChatChannel('general');
+    }
+  };
+
+  // Auto-scroll al final del chat cuando llegan nuevos mensajes o cambia de canal
+  useEffect(() => {
+    if (subVista === 'chat') {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [mensajesFiltrados, subVista, activeChatChannel]);
+
   const handleEnviar = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!nuevoMensaje.trim() || enviando) return;
 
     try {
       setEnviando(true);
-      await onEnviarMensaje(nuevoMensaje.trim(), tipoMensaje);
+      if (isDirectChat && targetDmEmail) {
+        await onEnviarMensaje(
+          nuevoMensaje.trim(),
+          'general',
+          targetDmEmail,
+          targetDmMember?.nombre || targetDmEmail
+        );
+      } else {
+        await onEnviarMensaje(nuevoMensaje.trim(), tipoMensaje);
+      }
       setNuevoMensaje('');
       if (tipoMensaje === 'urgente') setTipoMensaje('general');
     } finally {
@@ -618,18 +758,34 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                           💬 WhatsApp
                         </a>
                       )}
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        style={{ padding: '4px 8px', fontSize: '0.78rem' }}
-                        onClick={() => {
-                          setSubVista('chat');
-                          setNuevoMensaje(`@${m.nombre} `);
-                        }}
-                        title="Escribir en el chat de la empresa"
-                      >
-                        Mensaje
-                      </button>
+                      {m.email?.toLowerCase().trim() === myEmail ? (
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{ padding: '4px 8px', fontSize: '0.78rem' }}
+                          onClick={onOpenMiCuenta}
+                          title="Editar mi perfil"
+                        >
+                          👤 Mis datos
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '0.78rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontWeight: 700,
+                          }}
+                          onClick={() => handleIniciarChatDirecto(m.email)}
+                          title={`Iniciar conversación directa con ${m.nombre}`}
+                        >
+                          💬 Mensaje
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -644,40 +800,343 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       {/* ========================================================= */}
       {subVista === 'chat' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* BANNER INFORMATIVO */}
+          {/* SELECTOR DE CANALES DE CONVERSACIÓN */}
           <div
             className="card"
             style={{
               padding: '10px 14px',
               margin: 0,
-              background: 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.05) 100%)',
-              borderLeft: '4px solid var(--accent)',
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
             }}
           >
-            <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: 2 }}>
-              📢 Canal Corporativo de Indicaciones y Coordinación
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 8,
+                flexWrap: 'wrap',
+                gap: 6,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: '0.85rem' }}>💬</span>
+                <span
+                  style={{
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.6px',
+                    color: 'var(--muted)',
+                  }}
+                >
+                  Canales de Conversación
+                </span>
+              </div>
+              <div className="sub" style={{ fontSize: '0.72rem' }}>
+                {activeDmMembers.length > 0
+                  ? `${activeDmMembers.length} chat${activeDmMembers.length > 1 ? 's' : ''} directo${activeDmMembers.length > 1 ? 's' : ''} activo${activeDmMembers.length > 1 ? 's' : ''}`
+                  : 'Presiona "Mensaje" en cualquier miembro para abrir un chat directo'}
+              </div>
             </div>
-            <div className="sub" style={{ fontSize: '0.8rem' }}>
-              Espacio oficial para que la administración (Benjamín) comunique metas, cambios de ruta, alertas de stock y para que el equipo reporte novedades en tiempo real.
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
-              <span className="sub" style={{ fontSize: '0.74rem' }}>
-                💡 En iPhone / Safari: Activa alertas flotantes en pantalla y sonido.
-              </span>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                overflowX: 'auto',
+                paddingBottom: 4,
+              }}
+            >
+              {/* POSICIÓN #1 FIJA: CHAT GENERAL & ANUNCIOS */}
+              <button
+                type="button"
+                onClick={() => setActiveChatChannel('general')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '7px 14px',
+                  borderRadius: 10,
+                  border: activeChatChannel === 'general' ? '2px solid var(--accent)' : '1px solid var(--border)',
+                  background: activeChatChannel === 'general' ? 'var(--accent)' : 'rgba(0,0,0,0.03)',
+                  color: activeChatChannel === 'general' ? '#ffffff' : 'var(--text)',
+                  fontWeight: activeChatChannel === 'general' ? 800 : 600,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  boxShadow: activeChatChannel === 'general' ? '0 2px 8px rgba(37,99,235,0.35)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>📢</span>
+                <span>Chat General & Anuncios</span>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    padding: '1px 6px',
+                    borderRadius: 10,
+                    background: activeChatChannel === 'general' ? 'rgba(255,255,255,0.28)' : 'var(--border)',
+                    color: activeChatChannel === 'general' ? '#ffffff' : 'var(--muted)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {countMensajesGenerales}
+                </span>
+              </button>
+
+              {/* CHATS DIRECTOS ACTIVOS (INICIADOS POR CLICK EN 'MENSAJE' O MENSAJES PREVIOS) */}
+              {activeDmMembers.map((m) => {
+                const isAct = activeChatChannel === m.email.toLowerCase().trim();
+                const countDm = countMensajesDirectos(m.email);
+                return (
+                  <div
+                    key={m.email}
+                    onClick={() => setActiveChatChannel(m.email.toLowerCase().trim())}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '5px 10px',
+                      borderRadius: 10,
+                      border: isAct ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      background: isAct ? 'rgba(37,99,235,0.12)' : 'rgba(0,0,0,0.02)',
+                      color: isAct ? 'var(--accent)' : 'var(--text)',
+                      fontWeight: isAct ? 800 : 600,
+                      fontSize: '0.80rem',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                      boxShadow: isAct ? '0 2px 6px rgba(37,99,235,0.2)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <img
+                      src={getAvatarSrc(m.avatarId)}
+                      alt={m.nombre}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: isAct ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                      }}
+                      referrerPolicy="no-referrer"
+                    />
+                    <span>{m.nombre}</span>
+                    {countDm > 0 && (
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '1px 5px',
+                          borderRadius: 8,
+                          background: isAct ? 'var(--accent)' : 'var(--border)',
+                          color: isAct ? '#ffffff' : 'var(--muted)',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {countDm}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => handleCerrarChatDirecto(m.email, e)}
+                      title={`Cerrar conversación con ${m.nombre}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: isAct ? 'var(--accent)' : 'var(--muted)',
+                        cursor: 'pointer',
+                        padding: '0 2px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        opacity: 0.7,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+
+              {/* BOTÓN RÁPIDO PARA ABRIR EL DIRECTORIO DE MIEMBROS */}
               <button
                 type="button"
                 className="btn-ghost"
-                style={{ fontSize: '0.74rem', padding: '3px 8px', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                onClick={() => {
-                  playNotificationSound();
-                  showBrowserNotification('💬 Prueba de Notificación', '¡El sistema de sonido y alertas está funcionando!');
-                  alert('🔔 Prueba ejecutada:\n\n1. Sonido acústico dual reproducido.\n2. Alerta de mensaje enviada.\n\nEn iPhone (Safari normal), las alertas flotantes y sonidos se activan mientras tienes la app abierta. Si deseas notificaciones con pantalla apagada en iPhone, agrega el ícono a tu inicio (Compartir ➔ Agregar a pantalla de inicio).');
+                style={{
+                  padding: '5px 10px',
+                  fontSize: '0.76rem',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  border: '1px dashed var(--border)',
                 }}
+                onClick={() => setSubVista('miembros')}
+                title="Ir al directorio de miembros para iniciar un nuevo chat"
               >
-                🧪 Probar sonido y alerta
+                <span>➕</span> Iniciar con otro miembro
               </button>
             </div>
           </div>
+
+          {/* BANNER CONTEXTUAL: SEGÚN CANAL GENERAL O CHAT DIRECTO */}
+          {isDirectChat ? (
+            <div
+              className="card"
+              style={{
+                padding: '12px 16px',
+                margin: 0,
+                background: 'linear-gradient(135deg, rgba(37,99,235,0.09) 0%, rgba(6,182,212,0.05) 100%)',
+                borderLeft: '4px solid var(--accent)',
+                borderRadius: 12,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 240 }}>
+                <img
+                  src={getAvatarSrc(targetDmMember?.avatarId)}
+                  alt={targetDmMember?.nombre || 'Miembro'}
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                    border: '2px solid var(--accent)',
+                    boxShadow: '0 0 8px rgba(37,99,235,0.3)',
+                    flexShrink: 0,
+                  }}
+                  referrerPolicy="no-referrer"
+                />
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 800, fontSize: '0.96rem' }}>
+                      {targetDmMember?.nombre || targetDmEmail}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.66rem',
+                        fontWeight: 800,
+                        background: 'var(--accent)',
+                        color: '#fff',
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        letterSpacing: '0.5px',
+                      }}
+                    >
+                      🔒 CHAT PRIVADO 1 A 1
+                    </span>
+                    {targetDmMember?.isAdmin && (
+                      <span
+                        style={{
+                          fontSize: '0.64rem',
+                          fontWeight: 700,
+                          background: '#f59e0b',
+                          color: '#fff',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                        }}
+                      >
+                        👑 ADMIN
+                      </span>
+                    )}
+                  </div>
+                  <div className="sub" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                    {targetDmMember?.rol || 'Miembro del Equipo'} • {targetDmMember?.sucursal || 'Ventas'}
+                  </div>
+                  <div className="sub" style={{ fontSize: '0.72rem', marginTop: 1, color: 'var(--muted)' }}>
+                    ✉️ {targetDmMember?.email || targetDmEmail}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {targetDmMember?.telefono && (
+                  <a
+                    href={`https://wa.me/${targetDmMember.telefono.replace(/[^0-9]/g, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-green"
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: '0.78rem',
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    title="Abrir WhatsApp"
+                  >
+                    💬 WhatsApp
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ fontSize: '0.78rem', padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  onClick={() => setActiveChatChannel('general')}
+                  title="Volver a los anuncios corporativos para todo el equipo"
+                >
+                  📢 Ir a Anuncios
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ fontSize: '0.78rem', padding: '5px 8px', color: 'var(--muted)' }}
+                  onClick={(e) => targetDmEmail && handleCerrarChatDirecto(targetDmEmail, e)}
+                  title="Cerrar esta conversación privada de la barra"
+                >
+                  ✕ Cerrar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="card"
+              style={{
+                padding: '10px 14px',
+                margin: 0,
+                background: 'linear-gradient(135deg, var(--card) 0%, rgba(37,99,235,0.05) 100%)',
+                borderLeft: '4px solid var(--accent)',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: 2 }}>
+                📢 Canal Corporativo de Anuncios e Indicaciones (Fijo #1)
+              </div>
+              <div className="sub" style={{ fontSize: '0.8rem' }}>
+                Espacio oficial para que la administración (Benjamín) comunique metas, cambios de ruta, alertas de stock y para que el equipo reporte novedades en tiempo real a todos los miembros.
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                <span className="sub" style={{ fontSize: '0.74rem' }}>
+                  💡 En iPhone / Safari: Activa alertas flotantes en pantalla y sonido.
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ fontSize: '0.74rem', padding: '3px 8px', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  onClick={() => {
+                    playNotificationSound();
+                    showBrowserNotification('💬 Prueba de Notificación', '¡El sistema de sonido y alertas está funcionando!');
+                    alert('🔔 Prueba ejecutada:\n\n1. Sonido acústico dual reproducido.\n2. Alerta de mensaje enviada.\n\nEn iPhone (Safari normal), las alertas flotantes y sonidos se activan mientras tienes la app abierta. Si deseas notificaciones con pantalla apagada en iPhone, agrega el ícono a tu inicio (Compartir ➔ Agregar a pantalla de inicio).');
+                  }}
+                >
+                  🧪 Probar sonido y alerta
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* AVISO DE ACTIVACIÓN DE NOTIFICACIONES */}
           {permisoNotif === 'default' && (
@@ -702,7 +1161,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                     Activa las notificaciones de chat
                   </div>
                   <div className="sub" style={{ fontSize: '0.74rem' }}>
-                    Recibe alertas y sonido cuando un compañero o la administración envíe un mensaje.
+                    Recibe alertas y sonido cuando un compañero o la administración te envíe un mensaje.
                   </div>
                 </div>
               </div>
@@ -736,7 +1195,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
               margin: 0,
             }}
           >
-            {mensajes.length === 0 ? (
+            {mensajesFiltrados.length === 0 ? (
               <div
                 className="sub"
                 style={{
@@ -746,11 +1205,29 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                   fontStyle: 'italic',
                 }}
               >
-                No hay indicaciones aún en el canal. ¡Escribe el primer mensaje para el equipo!
+                {isDirectChat ? (
+                  <>
+                    <div style={{ fontSize: '1.2rem', marginBottom: 6 }}>🔒</div>
+                    <div>
+                      Aún no hay mensajes en esta conversación privada con <b>{targetDmMember?.nombre || targetDmEmail}</b>.
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: '0.78rem' }}>
+                      Escribe tu primer mensaje abajo para coordinar directamente.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: '1.2rem', marginBottom: 6 }}>📢</div>
+                    <div>No hay anuncios aún en el canal corporativo.</div>
+                    <div style={{ marginTop: 6, fontSize: '0.78rem' }}>
+                      ¡Escribe el primer mensaje para todo el equipo de ventas!
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
-              mensajes.map((msg, idx) => {
-                const esMio = msg.deEmail?.toLowerCase() === emailActual.toLowerCase();
+              mensajesFiltrados.map((msg, idx) => {
+                const esMio = msg.deEmail?.toLowerCase() === myEmail;
                 const esAdminMsg = msg.esAdmin || esAdminEmail(msg.deEmail, adminEmails);
                 const esUrgente = msg.tipo === 'urgente';
                 const esIndicacion = msg.tipo === 'indicacion';
@@ -795,8 +1272,22 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                         }}
                       >
                         <span style={{ fontWeight: 800, fontSize: '0.82rem', color: 'var(--text)' }}>
-                          {msg.deNombre}
+                          {esMio ? 'Tú' : msg.deNombre}
                         </span>
+                        {isDirectChat && (
+                          <span
+                            style={{
+                              fontSize: '0.60rem',
+                              fontWeight: 700,
+                              background: 'rgba(37,99,235,0.15)',
+                              color: 'var(--accent)',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                            }}
+                          >
+                            🔒 DIRECTO
+                          </span>
+                        )}
                         {esAdminMsg && (
                           <span
                             style={{
@@ -870,91 +1361,111 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             className="card"
             style={{ padding: '10px 12px', margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}
           >
-            {/* Si es Admin, puede marcar la categoría de la indicación */}
-            {isAdmin && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: '0.8rem', padding: '2px 0' }}>
-                <span className="sub" style={{ fontWeight: 700, marginRight: 2 }}>Prioridad:</span>
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    cursor: 'pointer',
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: tipoMensaje === 'general' ? 'var(--card)' : 'transparent',
-                    fontWeight: tipoMensaje === 'general' ? 700 : 500,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="tipoMsg"
-                    value="general"
-                    checked={tipoMensaje === 'general'}
-                    onChange={() => setTipoMensaje('general')}
-                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
-                  />
-                  <span>General</span>
-                </label>
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    cursor: 'pointer',
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    border: tipoMensaje === 'indicacion' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    background: tipoMensaje === 'indicacion' ? 'rgba(37,99,235,0.08)' : 'transparent',
-                    color: tipoMensaje === 'indicacion' ? 'var(--accent)' : 'var(--text)',
-                    fontWeight: tipoMensaje === 'indicacion' ? 700 : 500,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="tipoMsg"
-                    value="indicacion"
-                    checked={tipoMensaje === 'indicacion'}
-                    onChange={() => setTipoMensaje('indicacion')}
-                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
-                  />
-                  <span>📢 Indicación</span>
-                </label>
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    cursor: 'pointer',
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    border: tipoMensaje === 'urgente' ? '1px solid var(--accent2)' : '1px solid var(--border)',
-                    background: tipoMensaje === 'urgente' ? 'rgba(220,38,38,0.08)' : 'transparent',
-                    color: 'var(--accent2)',
-                    fontWeight: tipoMensaje === 'urgente' ? 700 : 500,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="tipoMsg"
-                    value="urgente"
-                    checked={tipoMensaje === 'urgente'}
-                    onChange={() => setTipoMensaje('urgente')}
-                    style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
-                  />
-                  <span>⚠️ Urgente</span>
-                </label>
+            {/* Si es chat directo, indicamos el destinatario privado */}
+            {isDirectChat ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: '0.78rem',
+                  color: 'var(--accent)',
+                  fontWeight: 700,
+                  padding: '2px 0',
+                }}
+              >
+                <span>🔒 Conversación privada con:</span>
+                <span style={{ textDecoration: 'underline' }}>{targetDmMember?.nombre || targetDmEmail}</span>
               </div>
+            ) : (
+              /* Si es Admin en canal general, puede marcar la categoría de la indicación */
+              isAdmin && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: '0.8rem', padding: '2px 0' }}>
+                  <span className="sub" style={{ fontWeight: 700, marginRight: 2 }}>Prioridad:</span>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      cursor: 'pointer',
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border)',
+                      background: tipoMensaje === 'general' ? 'var(--card)' : 'transparent',
+                      fontWeight: tipoMensaje === 'general' ? 700 : 500,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="tipoMsg"
+                      value="general"
+                      checked={tipoMensaje === 'general'}
+                      onChange={() => setTipoMensaje('general')}
+                      style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
+                    />
+                    <span>General</span>
+                  </label>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      cursor: 'pointer',
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      border: tipoMensaje === 'indicacion' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      background: tipoMensaje === 'indicacion' ? 'rgba(37,99,235,0.08)' : 'transparent',
+                      color: tipoMensaje === 'indicacion' ? 'var(--accent)' : 'var(--text)',
+                      fontWeight: tipoMensaje === 'indicacion' ? 700 : 500,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="tipoMsg"
+                      value="indicacion"
+                      checked={tipoMensaje === 'indicacion'}
+                      onChange={() => setTipoMensaje('indicacion')}
+                      style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
+                    />
+                    <span>📢 Indicación</span>
+                  </label>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      cursor: 'pointer',
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      border: tipoMensaje === 'urgente' ? '1px solid var(--accent2)' : '1px solid var(--border)',
+                      background: tipoMensaje === 'urgente' ? 'rgba(220,38,38,0.08)' : 'transparent',
+                      color: 'var(--accent2)',
+                      fontWeight: tipoMensaje === 'urgente' ? 700 : 500,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="tipoMsg"
+                      value="urgente"
+                      checked={tipoMensaje === 'urgente'}
+                      onChange={() => setTipoMensaje('urgente')}
+                      style={{ margin: 0, width: 14, height: 14, flex: '0 0 auto', cursor: 'pointer' }}
+                    />
+                    <span>⚠️ Urgente</span>
+                  </label>
+                </div>
+              )
             )}
 
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 type="text"
                 placeholder={
-                  isAdmin
-                    ? 'Escribe una indicación o mensaje para el equipo de ventas...'
-                    : 'Escribe un mensaje o consulta para Benjamín / equipo...'
+                  isDirectChat
+                    ? `Escribe un mensaje privado para ${targetDmMember?.nombre || targetDmEmail}...`
+                    : isAdmin
+                    ? 'Escribe un anuncio o indicación para todo el equipo de ventas...'
+                    : 'Escribe un mensaje para Benjamín y todo el equipo...'
                 }
                 value={nuevoMensaje}
                 onChange={(e) => setNuevoMensaje(e.target.value)}
@@ -966,7 +1477,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                 disabled={!nuevoMensaje.trim() || enviando}
                 style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
               >
-                {enviando ? 'Enviando...' : 'Enviar ➤'}
+                {enviando ? 'Enviando...' : isDirectChat ? 'Enviar Directo ➤' : 'Enviar ➤'}
               </button>
             </div>
           </form>

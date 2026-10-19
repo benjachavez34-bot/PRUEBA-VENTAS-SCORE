@@ -228,6 +228,9 @@ export interface MensajeChat {
   texto: string;
   ts: number;
   tipo?: 'general' | 'indicacion' | 'urgente';
+  paraEmail?: string;
+  paraNombre?: string;
+  canalId?: string;
 }
 
 export interface EvaluacionCriterios {
