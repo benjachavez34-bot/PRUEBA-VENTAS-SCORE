@@ -218,6 +218,14 @@ export interface Miembro {
   ultimaActividad?: number;
 }
 
+export interface AdjuntoChat {
+  nombre: string;
+  tipo: 'imagen' | 'archivo';
+  url: string; // base64 DataURL
+  tamano?: number; // bytes
+  mimeType?: string;
+}
+
 export interface MensajeChat {
   id?: string;
   deEmail: string;
@@ -231,6 +239,7 @@ export interface MensajeChat {
   paraEmail?: string;
   paraNombre?: string;
   canalId?: string;
+  adjunto?: AdjuntoChat;
 }
 
 export interface EvaluacionCriterios {

@@ -36,6 +36,7 @@ import {
   Cliente,
   Miembro,
   MensajeChat,
+  AdjuntoChat,
   EvaluacionVendedor,
   CartItem,
   TicketVenta,
@@ -2924,7 +2925,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     texto: string,
     tipo: 'general' | 'indicacion' | 'urgente' = 'general',
     paraEmail?: string,
-    paraNombre?: string
+    paraNombre?: string,
+    adjunto?: AdjuntoChat
   ) => {
     const cleanParaEmail = paraEmail ? paraEmail.toLowerCase().trim() : undefined;
     const myEmail = (user?.email || (isGuest ? 'invitado@local' : perfil.email || '')).toLowerCase().trim();
@@ -2942,6 +2944,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       ts: Date.now(),
       tipo,
       ...(cleanParaEmail ? { paraEmail: cleanParaEmail, paraNombre, canalId } : { canalId: 'general' }),
+      ...(adjunto ? { adjunto } : {}),
     };
 
     if (isGuest) {
@@ -2960,11 +2963,12 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     try {
       await addDoc(collection(db, 'mensajes'), msgData);
       // Encolar notificación push para teléfonos con la app cerrada
+      const pushTexto = msgData.texto || (adjunto ? (adjunto.tipo === 'imagen' ? '📷 Foto adjunta' : `📎 Archivo: ${adjunto.nombre}`) : 'Nuevo mensaje');
       registrarPushParaDispositivos(
         cleanParaEmail
           ? `🔒 ${perfil.nombre || miNombre} (Directo):`
           : `📢 ${perfil.nombre || miNombre}:`,
-        msgData.texto,
+        pushTexto,
         undefined,
         cleanParaEmail || undefined
       );

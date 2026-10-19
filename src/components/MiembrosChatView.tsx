@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Miembro, MensajeChat } from '../types';
+import { Miembro, MensajeChat, AdjuntoChat } from '../types';
 import { fTs } from '../utils/formatters';
 import scoreGorillaLogo from '../assets/images/score_gorilla_bg_1791923074721.jpg';
 import { playNotificationSound, showBrowserNotification } from '../utils/pushNotifications';
@@ -21,7 +21,8 @@ interface MiembrosChatViewProps {
     texto: string,
     tipo?: 'general' | 'indicacion' | 'urgente',
     paraEmail?: string,
-    paraNombre?: string
+    paraNombre?: string,
+    adjunto?: AdjuntoChat
   ) => Promise<void>;
   onOpenMiCuenta: () => void;
 }
@@ -41,6 +42,86 @@ const esAdminEmail = (email?: string, dynamicAdmins?: string[]) => {
     return dynamicAdmins.some((e) => e.toLowerCase().trim() === clean);
   }
   return ADMIN_EMAILS_DEFAULT.includes(clean);
+};
+
+export const EMOJI_CATEGORIAS = [
+  {
+    nombre: 'Reacciones & Gestos',
+    emojis: ['👍', '👎', '👌', '✌️', '👏', '🙌', '🤝', '👊', '🙏', '💪', '❤️', '🔥', '⭐', '💯'],
+  },
+  {
+    nombre: 'Caritas & Expresiones',
+    emojis: ['😀', '😁', '😂', '🤣', '😊', '😍', '😎', '🤔', '😅', '😬', '🥳', '😴', '😇', '🤩'],
+  },
+  {
+    nombre: 'Ventas & Operaciones',
+    emojis: ['💰', '💵', '💳', '📦', '🛒', '⚡', '🚀', '📈', '📊', '🎯', '🏆', '👑', '🔔', '📢', '📍'],
+  },
+  {
+    nombre: 'Símbolos & Alertas',
+    emojis: ['✅', '❌', '⚠️', '❗', '❓', '💡', '🔒', '🔑', '🛡️', '📌', '🏷️', '📝', '📋', '🚚', '⏰'],
+  },
+];
+
+export const comprimirImagen = (file: File, maxDim = 1024, quality = 0.75): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (!dataUrl) return reject(new Error('No se pudo leer la imagen'));
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
+export const formatFileSize = (bytes?: number) => {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+export const getFileIcon = (nombre: string) => {
+  const ext = (nombre || '').split('.').pop()?.toLowerCase();
+  if (['pdf'].includes(ext || '')) return '📕';
+  if (['xls', 'xlsx', 'csv'].includes(ext || '')) return '📊';
+  if (['doc', 'docx', 'txt', 'rtf'].includes(ext || '')) return '📄';
+  if (['zip', 'rar', '7z'].includes(ext || '')) return '🗜️';
+  return '📎';
+};
+
+export const descargarAdjunto = (url: string, nombre: string) => {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre || 'archivo_chat';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 };
 
 export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
@@ -88,7 +169,30 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     }
     return null;
   });
+  const [adjuntoPendiente, setAdjuntoPendiente] = useState<AdjuntoChat | null>(null);
+  const [procesandoAdjunto, setProcesandoAdjunto] = useState<boolean>(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
+  const [fotoFullscreen, setFotoFullscreen] = useState<AdjuntoChat | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
+  const mensajeInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        showEmojiPicker &&
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(e.target as Node)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   const isMeSuperAdmin = isSuperAdmin || emailActual?.toLowerCase().trim() === SUPER_ADMIN_EMAIL;
 
@@ -367,9 +471,99 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     }
   }, [mensajesFiltrados, subVista, activeChatChannel]);
 
+  const handleInsertEmoji = (emoji: string) => {
+    const input = mensajeInputRef.current;
+    if (input) {
+      const start = input.selectionStart || 0;
+      const end = input.selectionEnd || 0;
+      const nextText = nuevoMensaje.slice(0, start) + emoji + nuevoMensaje.slice(end);
+      setNuevoMensaje(nextText);
+      setTimeout(() => {
+        input.focus();
+        input.setSelectionRange(start + emoji.length, start + emoji.length);
+      }, 10);
+    } else {
+      setNuevoMensaje((prev) => prev + emoji);
+    }
+  };
+
+  const handleSelectFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setProcesandoAdjunto(true);
+      const compressedDataUrl = await comprimirImagen(file, 1024, 0.75);
+      const estSize = Math.round(compressedDataUrl.length * 0.75);
+      setAdjuntoPendiente({
+        nombre: file.name || 'foto.jpg',
+        tipo: 'imagen',
+        url: compressedDataUrl,
+        tamano: estSize,
+        mimeType: 'image/jpeg',
+      });
+    } catch (err: any) {
+      alert('No se pudo procesar la foto: ' + (err?.message || err));
+    } finally {
+      setProcesandoAdjunto(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleSelectArchivo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Límite de 750KB para sincronización directa en Firestore sin Storage externo
+    const MAX_BYTES = 750 * 1024;
+    if (file.size > MAX_BYTES) {
+      alert(
+        `El archivo "${file.name}" pesa ${(file.size / (1024 * 1024)).toFixed(1)} MB.\n\nEl límite para sincronización instantánea es de 750 KB por archivo para garantizar máxima velocidad.\n\nPor favor adjunta un documento PDF comprimido o una versión más ligera.`
+      );
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    try {
+      setProcesandoAdjunto(true);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (!dataUrl) {
+          alert('No se pudo leer el archivo seleccionado');
+          setProcesandoAdjunto(false);
+          return;
+        }
+        setAdjuntoPendiente({
+          nombre: file.name,
+          tipo: 'archivo',
+          url: dataUrl,
+          tamano: file.size,
+          mimeType: file.type,
+        });
+        setProcesandoAdjunto(false);
+      };
+      reader.onerror = () => {
+        alert('Error al leer el archivo');
+        setProcesandoAdjunto(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      alert('Error al procesar archivo: ' + (err?.message || err));
+      setProcesandoAdjunto(false);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoverAdjunto = () => {
+    setAdjuntoPendiente(null);
+    if (fotoInputRef.current) fotoInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleEnviar = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!nuevoMensaje.trim() || enviando) return;
+    if ((!nuevoMensaje.trim() && !adjuntoPendiente) || enviando) return;
 
     try {
       setEnviando(true);
@@ -378,12 +572,21 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
           nuevoMensaje.trim(),
           'general',
           targetDmEmail,
-          targetDmMember?.nombre || targetDmEmail
+          targetDmMember?.nombre || targetDmEmail,
+          adjuntoPendiente || undefined
         );
       } else {
-        await onEnviarMensaje(nuevoMensaje.trim(), tipoMensaje);
+        await onEnviarMensaje(
+          nuevoMensaje.trim(),
+          tipoMensaje,
+          undefined,
+          undefined,
+          adjuntoPendiente || undefined
+        );
       }
       setNuevoMensaje('');
+      setAdjuntoPendiente(null);
+      setShowEmojiPicker(false);
       if (tipoMensaje === 'urgente') setTipoMensaje('general');
     } finally {
       setEnviando(false);
@@ -1335,18 +1538,128 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                         </span>
                       </div>
 
+                      {/* Adjunto si existe (Foto o Archivo) */}
+                      {msg.adjunto && (
+                        <div style={{ marginBottom: msg.texto ? 8 : 0 }}>
+                          {msg.adjunto.tipo === 'imagen' ? (
+                            <div
+                              style={{
+                                position: 'relative',
+                                display: 'inline-block',
+                                borderRadius: 10,
+                                overflow: 'hidden',
+                                border: '1px solid var(--border)',
+                                cursor: 'pointer',
+                                background: '#000',
+                              }}
+                              onClick={() => setFotoFullscreen(msg.adjunto!)}
+                              title="Haz clic para ver en pantalla completa"
+                            >
+                              <img
+                                src={msg.adjunto.url}
+                                alt={msg.adjunto.nombre || 'Foto'}
+                                style={{
+                                  maxWidth: '100%',
+                                  maxHeight: 240,
+                                  display: 'block',
+                                  objectFit: 'cover',
+                                  transition: 'transform 0.2s',
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
+                                onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                              />
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  bottom: 6,
+                                  right: 6,
+                                  background: 'rgba(0,0,0,0.7)',
+                                  color: '#fff',
+                                  borderRadius: 6,
+                                  padding: '2px 7px',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 600,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  pointerEvents: 'none',
+                                }}
+                              >
+                                🔍 Ampliar
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 10,
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                background: esMio ? 'rgba(255,255,255,0.75)' : 'var(--card)',
+                                border: '1px solid var(--border)',
+                                minWidth: 200,
+                                maxWidth: '100%',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                <span style={{ fontSize: '1.4rem' }}>{getFileIcon(msg.adjunto.nombre)}</span>
+                                <div style={{ minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: '0.82rem',
+                                      fontWeight: 700,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      maxWidth: 180,
+                                    }}
+                                  >
+                                    {msg.adjunto.nombre}
+                                  </div>
+                                  <div className="sub" style={{ fontSize: '0.68rem' }}>
+                                    {formatFileSize(msg.adjunto.tamano)}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => descargarAdjunto(msg.adjunto!.url, msg.adjunto!.nombre)}
+                                style={{
+                                  fontSize: '0.74rem',
+                                  padding: '4px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  whiteSpace: 'nowrap',
+                                  border: '1px solid var(--border)',
+                                }}
+                                title="Descargar archivo"
+                              >
+                                ⬇️ Descargar
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Texto del mensaje */}
-                      <div
-                        style={{
-                          fontSize: '0.88rem',
-                          lineHeight: 1.45,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          color: 'var(--text)',
-                        }}
-                      >
-                        {msg.texto}
-                      </div>
+                      {msg.texto && (
+                        <div
+                          style={{
+                            fontSize: '0.88rem',
+                            lineHeight: 1.45,
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            color: 'var(--text)',
+                          }}
+                        >
+                          {msg.texto}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1359,8 +1672,26 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
           <form
             onSubmit={handleEnviar}
             className="card"
-            style={{ padding: '10px 12px', margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}
+            style={{ padding: '10px 12px', margin: 0, display: 'flex', flexDirection: 'column', gap: 8, position: 'relative' }}
           >
+            {/* Input oculto para fotos */}
+            <input
+              ref={fotoInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleSelectFoto}
+            />
+
+            {/* Input oculto para archivos y documentos */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip,.rar"
+              style={{ display: 'none' }}
+              onChange={handleSelectArchivo}
+            />
+
             {/* Si es chat directo, indicamos el destinatario privado */}
             {isDirectChat ? (
               <div
@@ -1457,8 +1788,209 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
               )
             )}
 
+            {/* PREVIEW DE ADJUNTO PENDIENTE (FOTO O ARCHIVO) */}
+            {adjuntoPendiente && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  background: adjuntoPendiente.tipo === 'imagen' ? 'rgba(37,99,235,0.08)' : 'rgba(0,0,0,0.04)',
+                  border: '1px solid var(--accent)',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  {adjuntoPendiente.tipo === 'imagen' ? (
+                    <img
+                      src={adjuntoPendiente.url}
+                      alt="Preview"
+                      style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--border)' }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: '1.3rem' }}>{getFileIcon(adjuntoPendiente.nombre)}</span>
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.80rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>
+                      {adjuntoPendiente.nombre}
+                    </div>
+                    <div className="sub" style={{ fontSize: '0.70rem' }}>
+                      {adjuntoPendiente.tipo === 'imagen' ? '📷 Foto adjunta' : '📎 Archivo adjunto'} • {formatFileSize(adjuntoPendiente.tamano)}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={handleRemoverAdjunto}
+                  style={{ color: '#ef4444', border: 'none', background: 'transparent', padding: '4px 8px', fontSize: '0.9rem', cursor: 'pointer' }}
+                  title="Quitar adjunto"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* POPUP SELECTOR DE EMOJIS */}
+            {showEmojiPicker && (
+              <div
+                ref={emojiPickerRef}
+                className="card"
+                style={{
+                  padding: '10px 12px',
+                  margin: 0,
+                  borderRadius: 12,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+                  border: '1.5px solid var(--accent)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  maxHeight: 250,
+                  overflowY: 'auto',
+                  background: 'var(--card)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: 4 }}>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--muted)' }}>
+                    😀 Selector de Emojis
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker(false)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--muted)' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {EMOJI_CATEGORIAS.map((cat) => (
+                  <div key={cat.nombre}>
+                    <div className="sub" style={{ fontSize: '0.68rem', fontWeight: 700, marginBottom: 4 }}>
+                      {cat.nombre}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {cat.emojis.map((em) => (
+                        <button
+                          key={em}
+                          type="button"
+                          onClick={() => handleInsertEmoji(em)}
+                          style={{
+                            background: 'rgba(0,0,0,0.03)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            fontSize: '1.15rem',
+                            padding: '4px 8px',
+                            cursor: 'pointer',
+                            lineHeight: 1,
+                          }}
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* BARRA DE HERRAMIENTAS: BOTONES DE FOTO, ARCHIVO Y EMOJIS */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => setShowEmojiPicker((v) => !v)}
+                  style={{
+                    fontSize: '0.80rem',
+                    padding: '4px 9px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    borderRadius: 8,
+                    border: showEmojiPicker ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                    background: showEmojiPicker ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  }}
+                  title="Insertar emojis"
+                >
+                  <span>😀</span> <span>Emojis</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => fotoInputRef.current?.click()}
+                  disabled={procesandoAdjunto}
+                  style={{
+                    fontSize: '0.80rem',
+                    padding: '4px 9px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                  }}
+                  title="Tomar o seleccionar foto"
+                >
+                  <span>📷</span> <span>Foto</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={procesandoAdjunto}
+                  style={{
+                    fontSize: '0.80rem',
+                    padding: '4px 9px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                  }}
+                  title="Adjuntar documento o archivo (PDF, Excel, Word)"
+                >
+                  <span>📎</span> <span>Archivo</span>
+                </button>
+
+                {procesandoAdjunto && (
+                  <span className="sub" style={{ fontSize: '0.74rem', color: 'var(--accent)', fontWeight: 600 }}>
+                    ⏳ Procesando adjunto...
+                  </span>
+                )}
+              </div>
+
+              {/* BARRA DE EMOJIS RÁPIDOS */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto' }}>
+                {['👍', '❤️', '🔥', '👏', '😂', '🙏', '🚀', '⚡', '📦', '💰', '✅'].map((em) => (
+                  <button
+                    key={em}
+                    type="button"
+                    onClick={() => handleInsertEmoji(em)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '1.05rem',
+                      padding: '2px 3px',
+                      borderRadius: 4,
+                      lineHeight: 1,
+                    }}
+                    title={`Insertar ${em}`}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* FILA DE TEXTO Y BOTÓN ENVIAR */}
             <div style={{ display: 'flex', gap: 8 }}>
               <input
+                ref={mensajeInputRef}
                 type="text"
                 placeholder={
                   isDirectChat
@@ -1474,13 +2006,83 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
               <button
                 type="submit"
                 className="btn-primary"
-                disabled={!nuevoMensaje.trim() || enviando}
+                disabled={(!nuevoMensaje.trim() && !adjuntoPendiente) || enviando || procesandoAdjunto}
                 style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
               >
                 {enviando ? 'Enviando...' : isDirectChat ? 'Enviar Directo ➤' : 'Enviar ➤'}
               </button>
             </div>
           </form>
+
+          {/* LIGHTBOX MODAL PARA VER FOTO FULLSCREEN */}
+          {fotoFullscreen && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.88)',
+                zIndex: 99999,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 16,
+                backdropFilter: 'blur(5px)',
+              }}
+              onClick={() => setFotoFullscreen(null)}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  width: '100%',
+                  maxWidth: 800,
+                  marginBottom: 10,
+                  color: '#fff',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  📷 {fotoFullscreen.nombre}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ fontSize: '0.80rem', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => descargarAdjunto(fotoFullscreen.url, fotoFullscreen.nombre)}
+                  >
+                    ⬇️ Descargar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ color: '#fff', fontSize: '1rem', padding: '6px 12px', border: '1px solid rgba(255,255,255,0.3)' }}
+                    onClick={() => setFotoFullscreen(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <img
+                src={fotoFullscreen.url}
+                alt={fotoFullscreen.nombre}
+                style={{
+                  maxWidth: '92vw',
+                  maxHeight: '82vh',
+                  objectFit: 'contain',
+                  borderRadius: 10,
+                  boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
