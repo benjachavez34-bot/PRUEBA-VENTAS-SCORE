@@ -23,6 +23,7 @@ interface ModalCheckoutPOSProps {
   posTelefono: string;
   setPosTelefono: (val: string) => void;
   clientNames: string[];
+  clientPhones?: string[];
   clientes: Record<string, Cliente>;
   onCobrar: () => Promise<void>;
 }
@@ -48,6 +49,7 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
   posTelefono,
   setPosTelefono,
   clientNames,
+  clientPhones = [],
   clientes,
   onCobrar,
 }) => {
@@ -510,7 +512,7 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
           <div className="sub" style={{ fontSize: '0.78rem', marginBottom: 4, fontWeight: 700 }}>
             {posMedioPago === 'fiado'
               ? '👤 Cliente Fiado / Crédito (Obligatorio): *'
-              : '👤 Cliente & WhatsApp (Opcional para ticket digital):'}
+              : '👤 Cliente & WhatsApp (Opcional para comprobante):'}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div>
@@ -521,9 +523,26 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
                 onChange={(e) => {
                   const val = e.target.value;
                   setPosCliente(val);
-                  const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                  if (clientes[k]?.telefono && (!posTelefono || posTelefono === '+56 9 ')) {
-                    setPosTelefono(clientes[k].telefono || '');
+                  const normVal = val
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9]/g, '');
+
+                  if (normVal) {
+                    const match = Object.values(clientes).find((c) => {
+                      const cNorm = c.nombre
+                        .trim()
+                        .toLowerCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/[^a-z0-9]/g, '');
+                      return cNorm === normVal || (c.id && c.id.toLowerCase() === normVal);
+                    });
+                    if (match?.telefono && (!posTelefono || posTelefono === '+56 9 ')) {
+                      setPosTelefono(match.telefono);
+                    }
                   }
                 }}
                 style={{ fontSize: '0.86rem' }}
@@ -538,10 +557,30 @@ export const ModalCheckoutPOS: React.FC<ModalCheckoutPOSProps> = ({
               <input
                 type="tel"
                 placeholder="WhatsApp (+56 9...)"
+                list="listaTelefonosCheckout"
                 value={posTelefono}
-                onChange={(e) => setPosTelefono(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPosTelefono(val);
+                  const digits = val.replace(/\D/g, '');
+                  if (digits.length >= 8) {
+                    const match = Object.values(clientes).find((c) => {
+                      if (!c.telefono) return false;
+                      const cDigits = c.telefono.replace(/\D/g, '');
+                      return cDigits.endsWith(digits.slice(-8)) || digits.endsWith(cDigits.slice(-8));
+                    });
+                    if (match?.nombre && (!posCliente.trim() || posCliente.startsWith('Cliente '))) {
+                      setPosCliente(match.nombre);
+                    }
+                  }
+                }}
                 style={{ fontSize: '0.86rem' }}
               />
+              <datalist id="listaTelefonosCheckout">
+                {clientPhones.map((ph) => (
+                  <option key={ph} value={ph} />
+                ))}
+              </datalist>
             </div>
           </div>
         </div>

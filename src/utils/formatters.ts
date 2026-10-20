@@ -40,6 +40,71 @@ export function stockDe(pid: string, movs: Movimiento[]): number {
   }, 0);
 }
 
+export interface EstadoMorosidad {
+  estado: 'aldia' | 'atencion' | 'critico';
+  diasMora: number; // días transcurridos desde el 21 (0 si no ha vencido)
+  label: string;
+  fechaVencimiento: Date;
+}
+
+/**
+ * Calcula el estado de morosidad con corte los días 21 de cada mes:
+ * - Si la deuda se originó antes del 21, vence el 21 de ese mismo mes.
+ * - Si se originó el 21 o después, vence el 21 del mes siguiente.
+ * - Antes del 21: Al día (Vence el 21).
+ * - Del 21 al 28 (1 a 7 días): En Atención (desde el 21).
+ * - Más de 7 días pasados del 21: Vencido.
+ */
+export function calcularEstadoMorosidad(primerDeudaTs?: number, now = Date.now()): EstadoMorosidad {
+  if (!primerDeudaTs) {
+    return {
+      estado: 'aldia',
+      diasMora: 0,
+      label: 'Al día (Vence el 21)',
+      fechaVencimiento: new Date(),
+    };
+  }
+
+  const d = new Date(primerDeudaTs);
+  let vYear = d.getFullYear();
+  let vMonth = d.getMonth();
+  if (d.getDate() >= 21) {
+    vMonth += 1;
+    if (vMonth > 11) {
+      vMonth = 0;
+      vYear += 1;
+    }
+  }
+  const fechaVencimiento = new Date(vYear, vMonth, 21, 0, 0, 0, 0);
+  const venceTs = fechaVencimiento.getTime();
+
+  if (now < venceTs) {
+    return {
+      estado: 'aldia',
+      diasMora: 0,
+      label: 'Al día (Vence el 21)',
+      fechaVencimiento,
+    };
+  }
+
+  const diasMora = Math.floor((now - venceTs) / (1000 * 60 * 60 * 24));
+  if (diasMora <= 7) {
+    return {
+      estado: 'atencion',
+      diasMora,
+      label: diasMora === 0 ? 'En Atención (Desde hoy 21)' : `En Atención (${diasMora}d desde el 21)`,
+      fechaVencimiento,
+    };
+  } else {
+    return {
+      estado: 'critico',
+      diasMora,
+      label: `Vencido (${diasMora}d desde el 21)`,
+      fechaVencimiento,
+    };
+  }
+}
+
 export function getDeudores(
   movs: Movimiento[],
   clientesMap?: Record<string, Cliente>
@@ -54,31 +119,6 @@ export function getDeudores(
     }
   > = {};
 
-  movs.forEach((m) => {
-    if (!m.cliente) return;
-    const isDebt = (m.tipo === 'venta' && m.fiado) || m.tipo === 'deuda';
-    const isPay = m.tipo === 'pago';
-    if (!isDebt && !isPay) return;
-    const k = m.cliente.trim().toLowerCase();
-    if (!map[k]) {
-      map[k] = { nombre: m.cliente.trim(), deuda: 0 };
-    }
-    map[k].deuda += isDebt ? m.total || 0 : -(m.total || 0);
-
-    // Registrar antigüedad de deuda
-    if (isDebt && m.ts) {
-      if (!map[k].primerDeudaTs || m.ts < map[k].primerDeudaTs!) {
-        map[k].primerDeudaTs = m.ts;
-      }
-    }
-    if (m.ts) {
-      if (!map[k].ultimoMovimientoTs || m.ts > map[k].ultimoMovimientoTs!) {
-        map[k].ultimoMovimientoTs = m.ts;
-      }
-    }
-  });
-
-  const now = Date.now();
   const normalize = (s: string) =>
     s
       .trim()
@@ -87,19 +127,63 @@ export function getDeudores(
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]/g, '');
 
+  movs.forEach((m) => {
+    if (!m.cliente) return;
+    const k = normalize(m.cliente);
+    if (!k) return;
+
+    const isDebt = (m.tipo === 'venta' && m.fiado) || m.tipo === 'deuda';
+    const isPay = m.tipo === 'pago';
+
+    if (!map[k]) {
+      map[k] = { nombre: m.cliente.trim(), deuda: 0 };
+    }
+
+    if (isDebt) {
+      map[k].deuda += m.total || 0;
+      if (m.ts && (!map[k].primerDeudaTs || m.ts < map[k].primerDeudaTs!)) {
+        map[k].primerDeudaTs = m.ts;
+      }
+    } else if (isPay) {
+      map[k].deuda -= m.total || 0;
+    }
+
+    if (m.ts) {
+      if (!map[k].ultimoMovimientoTs || m.ts > map[k].ultimoMovimientoTs!) {
+        map[k].ultimoMovimientoTs = m.ts;
+      }
+    }
+  });
+
+  // Incorporar clientes del directorio aunque hayan pagado al contado o no tengan deuda pendiente
+  if (clientesMap) {
+    Object.values(clientesMap).forEach((c) => {
+      if (!c.nombre) return;
+      const k = normalize(c.nombre);
+      if (!k) return;
+      if (!map[k]) {
+        map[k] = {
+          nombre: c.nombre.trim(),
+          deuda: 0,
+          ultimoMovimientoTs: c.actualizadoEn || c.creadoEn,
+        };
+      }
+    });
+  }
+
+  const now = Date.now();
+
   return Object.values(map)
     .map((item) => {
-      const k = item.nombre.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
       const normKey = normalize(item.nombre);
 
-      let clienteInfo = clientesMap ? clientesMap[k] : undefined;
-      if (!clienteInfo && clientesMap) {
-        clienteInfo = Object.values(clientesMap).find(
-          (c) => normalize(c.nombre) === normKey || (c.id ? normalize(c.id) === normKey : false)
-        );
-      }
+      let clienteInfo = clientesMap
+        ? Object.values(clientesMap).find(
+            (c) => normalize(c.nombre) === normKey || (c.id ? normalize(c.id) === normKey : false)
+          )
+        : undefined;
 
-      // Si aún no hay teléfono en el directorio, buscar si vino guardado en algún movimiento previo del cliente
+      // Si aún no hay teléfono en el directorio, buscar en movimientos previos
       let telEncontrado = clienteInfo?.telefono;
       if (!telEncontrado) {
         const mConTel = movs.find(
@@ -110,18 +194,31 @@ export function getDeudores(
         }
       }
 
+      const tieneDeuda = item.deuda > 0.5;
+      const estadoInfo = tieneDeuda
+        ? calcularEstadoMorosidad(item.primerDeudaTs, now)
+        : {
+            estado: 'aldia' as const,
+            diasMora: 0,
+            label: 'Al día (Sin deuda)',
+            fechaVencimiento: new Date(),
+          };
+
       const diasAntiguedad = item.primerDeudaTs
         ? Math.max(0, Math.floor((now - item.primerDeudaTs) / (1000 * 60 * 60 * 24)))
         : 0;
 
       return {
         nombre: item.nombre,
-        deuda: item.deuda,
+        deuda: Math.max(0, item.deuda),
         telefono: telEncontrado,
         limiteCredito: clienteInfo?.limiteCredito,
-        primerDeudaTs: item.primerDeudaTs,
+        primerDeudaTs: tieneDeuda ? item.primerDeudaTs : undefined,
         ultimoMovimientoTs: item.ultimoMovimientoTs,
         diasAntiguedad,
+        estadoMorosidad: estadoInfo.estado,
+        diasMora: estadoInfo.diasMora,
+        labelMorosidad: estadoInfo.label,
       };
     })
     .sort((a, b) => b.deuda - a.deuda || a.nombre.localeCompare(b.nombre));
@@ -647,6 +744,7 @@ export interface ConciliacionCierre {
   hasta: number;
   ventasEfectivo: number;
   pagosEfectivo: number;
+  comprasStock: number;
   efectivoEsperado: number;
   transferenciaEsperado: number;
   debitoEsperado: number;
@@ -672,6 +770,7 @@ export function calcConciliacionCierre(
 
   let ventasEfectivo = 0;
   let pagosEfectivo = 0;
+  let comprasStock = 0;
   let transferenciaEsperado = 0;
   let debitoEsperado = 0;
   let fiadoTotal = 0;
@@ -685,7 +784,9 @@ export function calcConciliacionCierre(
     if (!(m.ts > desde && m.ts <= hasta)) return;
     const pid = m.productoId || '';
 
-    if (m.tipo === 'venta') {
+    if (m.tipo === 'entrada') {
+      comprasStock += m.costoTotal || 0;
+    } else if (m.tipo === 'venta') {
       transacciones++;
       totalVentas += m.total || 0;
       unidadesVendidas += m.cant || 0;
@@ -712,7 +813,8 @@ export function calcConciliacionCierre(
     }
   });
 
-  const efectivoEsperado = ventasEfectivo + pagosEfectivo;
+  // El efectivo esperado descuenta las compras de stock realizadas con dinero generado en caja
+  const efectivoEsperado = (ventasEfectivo + pagosEfectivo) - comprasStock;
   const totalEsperado = efectivoEsperado + transferenciaEsperado + debitoEsperado;
 
   return {
@@ -720,6 +822,7 @@ export function calcConciliacionCierre(
     hasta,
     ventasEfectivo,
     pagosEfectivo,
+    comprasStock,
     efectivoEsperado,
     transferenciaEsperado,
     debitoEsperado,
@@ -776,13 +879,14 @@ export function generarMensajeWhatsAppCierre(
     `RESUMEN OPERATIVO`,
     `• Ventas totales: ${fmt(cierre.vend)} (${cierre.ventas} ventas)`,
     `• Dinero ingresado: ${fmt(cierre.ingresado)}`,
+    cierre.comprasStock ? `• Compras de stock (caja): -${fmt(cierre.comprasStock)}` : null,
     `• Ganancia calculada: ${fmt(cierre.ganancia)}`,
     cierre.fiadoTotal ? `• Fiados otorgados: ${fmt(cierre.fiadoTotal)}` : null,
     cierre.mermasTotal ? `• Mermas/Desperdicio: ${fmt(cierre.mermasTotal)}` : null,
     `----------------------------------------`,
     `DESGLOSE POR MEDIO DE PAGO`,
     `• Efectivo:`,
-    `  - Esperado: ${fmt(efEsp)}`,
+    `  - Esperado: ${fmt(efEsp)}${cierre.comprasStock ? ` (desc. stock: -${fmt(cierre.comprasStock)})` : ''}`,
     `  - Real en mano: ${fmt(efReal)}`,
     `  - Dif: ${difEf === 0 ? '$0' : difEf > 0 ? `+${fmt(difEf)}` : `-${fmt(Math.abs(difEf))}`}`,
     `• Transferencias:`,

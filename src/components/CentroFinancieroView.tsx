@@ -221,7 +221,7 @@ export const CentroFinancieroView: React.FC<CentroFinancieroViewProps> = ({
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span className="sub" style={{ fontWeight: 700, textTransform: 'uppercase', fontSize: '0.72rem' }}>
-                  🏦 Dinero en Cuenta / Caja
+                  🏦 Dinero que deberías tener (Caja & Cuenta)
                 </span>
                 <span style={{ fontSize: '1rem' }}>💵</span>
               </div>
@@ -232,7 +232,7 @@ export const CentroFinancieroView: React.FC<CentroFinancieroViewProps> = ({
                 {fmt(cta)}
               </div>
               <div className="sub" style={{ fontSize: '0.75rem' }}>
-                Saldo operativo real que deberías tener en cuenta
+                Saldo neto total: Dinero generado por ventas menos compras de stock
               </div>
             </div>
 
@@ -355,6 +355,36 @@ export const CentroFinancieroView: React.FC<CentroFinancieroViewProps> = ({
               </span>
               <span className="amount ok" style={{ fontSize: '1.1rem', fontWeight: 800 }}>
                 {fmt(resumenPeriodo.ingresado)}
+              </span>
+            </div>
+
+            <div
+              className="item"
+              style={{
+                background: 'rgba(59, 130, 246, 0.12)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                border: '1px solid rgba(59, 130, 246, 0.35)',
+                margin: '8px 0',
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '0.94rem' }}>
+                  💰 Dinero que deberías tener actualmente (Saldo Neto Caja)
+                </div>
+                <div className="sub" style={{ fontSize: '0.74rem', marginTop: 2 }}>
+                  Ingresos ({fmt(resumenPeriodo.ingresado)}) menos compras de stock pagadas con caja (-{fmt(resumenPeriodo.inv)})
+                </div>
+              </div>
+              <span
+                className="amount ok"
+                style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 900,
+                  color: (resumenPeriodo.ingresado - resumenPeriodo.inv) >= 0 ? '#10b981' : '#ef4444',
+                }}
+              >
+                {fmt(resumenPeriodo.ingresado - resumenPeriodo.inv)}
               </span>
             </div>
             <div className="item">

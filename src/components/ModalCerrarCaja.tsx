@@ -234,7 +234,10 @@ export const ModalCerrarCaja: React.FC<ModalCerrarCajaProps> = ({
                   <span className="sub">Esperado: </span>
                   <b>{fmt(conciliacion.efectivoEsperado)}</b>
                   <span className="sub" style={{ fontSize: '0.72rem', marginLeft: 4 }}>
-                    (Ventas {fmt(conciliacion.ventasEfectivo)} + Pagos {fmt(conciliacion.pagosEfectivo)})
+                    (Ventas {fmt(conciliacion.ventasEfectivo)} + Pagos {fmt(conciliacion.pagosEfectivo)}
+                    {conciliacion.comprasStock && conciliacion.comprasStock > 0
+                      ? ` - Stock ${fmt(conciliacion.comprasStock)}`
+                      : ''})
                   </span>
                 </div>
               ) : (

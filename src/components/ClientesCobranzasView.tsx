@@ -61,17 +61,13 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
       );
     }
 
-    // Filtro por píldora de morosidad
+    // Filtro por píldora de morosidad (regla del día 21 de cada mes)
     if (filtroEstado === 'critico') {
-      result = result.filter((d) => d.diasAntiguedad !== undefined && d.diasAntiguedad > 15);
+      result = result.filter((d) => d.deuda > 0.5 && d.estadoMorosidad === 'critico');
     } else if (filtroEstado === 'atencion') {
-      result = result.filter(
-        (d) => d.diasAntiguedad !== undefined && d.diasAntiguedad >= 7 && d.diasAntiguedad <= 15
-      );
+      result = result.filter((d) => d.deuda > 0.5 && d.estadoMorosidad === 'atencion');
     } else if (filtroEstado === 'aldia') {
-      result = result.filter(
-        (d) => d.deuda <= 0 || (d.diasAntiguedad !== undefined && d.diasAntiguedad < 7)
-      );
+      result = result.filter((d) => d.deuda <= 0.5 || d.estadoMorosidad === 'aldia');
     } else if (filtroEstado === 'limite') {
       result = result.filter(
         (d) => d.limiteCredito && d.limiteCredito > 0 && d.deuda >= d.limiteCredito * 0.8
@@ -164,7 +160,7 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
         >
           <div>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.5px' }}>
-              Deuda Total por Cobrar ({deudoresList.length} clientes)
+              Deuda Total por Cobrar ({deudoresList.filter((d) => d.deuda > 0.5).length} deudores / {deudoresList.length} clientes)
             </span>
             {busquedaDeudor.trim() || filtroEstado !== 'todos' ? (
               <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f59e0b', marginTop: 3 }}>
@@ -199,7 +195,7 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
               }}
               onClick={() => setFiltroEstado(filtroEstado === 'aldia' ? 'todos' : 'aldia')}
             >
-              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#10b981' }}>🟢 AL DÍA (&lt;7d)</div>
+              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#10b981' }}>🟢 AL DÍA (Vence el 21)</div>
               <div style={{ fontSize: '1rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.alDia}</div>
             </div>
 
@@ -215,7 +211,7 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
               }}
               onClick={() => setFiltroEstado(filtroEstado === 'atencion' ? 'todos' : 'atencion')}
             >
-              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#f59e0b' }}>🟡 ATENCIÓN (7-15d)</div>
+              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#f59e0b' }}>🟡 ATENCIÓN (Desde el 21)</div>
               <div style={{ fontSize: '1rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.atencion}</div>
             </div>
 
@@ -231,7 +227,7 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
               }}
               onClick={() => setFiltroEstado(filtroEstado === 'critico' ? 'todos' : 'critico')}
             >
-              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#ef4444' }}>🔴 VENCIDO (&gt;15d)</div>
+              <div style={{ fontSize: '0.70rem', fontWeight: 800, color: '#ef4444' }}>🔴 VENCIDO (&gt;7d del 21)</div>
               <div style={{ fontSize: '1rem', fontWeight: 800, marginTop: 2 }}>{resumenMorosidad.critico}</div>
             </div>
           </div>
@@ -333,9 +329,11 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
               : 0;
 
             const estadoColorClass =
-              d.diasAntiguedad !== undefined && d.diasAntiguedad > 15
+              d.deuda <= 0.5
+                ? 'al-dia'
+                : d.estadoMorosidad === 'critico'
                 ? 'moroso'
-                : d.diasAntiguedad !== undefined && d.diasAntiguedad >= 7
+                : d.estadoMorosidad === 'atencion'
                 ? 'atencion'
                 : 'al-dia';
 
@@ -361,42 +359,42 @@ export const ClientesCobranzasView: React.FC<ClientesCobranzasViewProps> = ({
                           {d.nombre}
                         </span>
 
-                        {/* Semáforo de Morosidad */}
-                        {d.diasAntiguedad !== undefined && (
-                          <span
-                            style={{
-                              fontSize: '0.68rem',
-                              fontWeight: 700,
-                              padding: '2px 7px',
-                              borderRadius: 12,
-                              background:
-                                d.diasAntiguedad > 15
-                                  ? 'rgba(239, 68, 68, 0.18)'
-                                  : d.diasAntiguedad >= 7
-                                  ? 'rgba(245, 158, 11, 0.18)'
-                                  : 'rgba(16, 185, 129, 0.18)',
-                              color:
-                                d.diasAntiguedad > 15
-                                  ? '#ef4444'
-                                  : d.diasAntiguedad >= 7
-                                  ? '#f59e0b'
-                                  : '#10b981',
-                              border: `1px solid ${
-                                d.diasAntiguedad > 15
-                                  ? 'rgba(239, 68, 68, 0.35)'
-                                  : d.diasAntiguedad >= 7
-                                  ? 'rgba(245, 158, 11, 0.35)'
-                                  : 'rgba(16, 185, 129, 0.35)'
-                              }`,
-                            }}
-                          >
-                            {d.diasAntiguedad > 15
-                              ? `🔴 Vencida (${d.diasAntiguedad}d)`
-                              : d.diasAntiguedad >= 7
-                              ? `🟡 Atención (${d.diasAntiguedad}d)`
-                              : `🟢 Al día (${d.diasAntiguedad === 0 ? 'Hoy' : `${d.diasAntiguedad}d`})`}
-                          </span>
-                        )}
+                        {/* Semáforo de Morosidad (Corte el 21) */}
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: 12,
+                            background:
+                              d.deuda <= 0.5 || d.estadoMorosidad === 'aldia'
+                                ? 'rgba(16, 185, 129, 0.18)'
+                                : d.estadoMorosidad === 'atencion'
+                                ? 'rgba(245, 158, 11, 0.18)'
+                                : 'rgba(239, 68, 68, 0.18)',
+                            color:
+                              d.deuda <= 0.5 || d.estadoMorosidad === 'aldia'
+                                ? '#10b981'
+                                : d.estadoMorosidad === 'atencion'
+                                ? '#f59e0b'
+                                : '#ef4444',
+                            border: `1px solid ${
+                              d.deuda <= 0.5 || d.estadoMorosidad === 'aldia'
+                                ? 'rgba(16, 185, 129, 0.35)'
+                                : d.estadoMorosidad === 'atencion'
+                                ? 'rgba(245, 158, 11, 0.35)'
+                                : 'rgba(239, 68, 68, 0.35)'
+                            }`,
+                          }}
+                        >
+                          {d.deuda <= 0.5
+                            ? '🟢 Al día (Sin deuda)'
+                            : d.estadoMorosidad === 'critico'
+                            ? `🔴 ${d.labelMorosidad || 'Vencido'}`
+                            : d.estadoMorosidad === 'atencion'
+                            ? `🟡 ${d.labelMorosidad || 'En atención'}`
+                            : `🟢 ${d.labelMorosidad || 'Al día'}`}
+                        </span>
                       </div>
 
                       {/* Teléfono & Acceso a Perfil */}

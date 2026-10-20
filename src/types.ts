@@ -94,6 +94,7 @@ export interface CierreCaja {
   debitoReal?: number;
   fiadoTotal?: number;
   mermasTotal?: number;
+  comprasStock?: number;
   diferenciaTotal?: number;
   estadoArqueo?: 'cuadrada' | 'sobrante' | 'faltante';
   observaciones?: string;
@@ -119,6 +120,9 @@ export interface Deudor {
   primerDeudaTs?: number;
   ultimoMovimientoTs?: number;
   limiteCredito?: number;
+  estadoMorosidad?: 'aldia' | 'atencion' | 'critico';
+  diasMora?: number;
+  labelMorosidad?: string;
 }
 
 export interface ResumenPeriodo {

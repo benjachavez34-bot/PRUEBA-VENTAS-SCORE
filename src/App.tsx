@@ -968,6 +968,17 @@ export default function App() {
     return Array.from(setNames).sort((a, b) => a.localeCompare(b));
   }, [movs, clientes]);
 
+  const clientPhones = useMemo(() => {
+    const setPhones = new Set<string>();
+    movs.forEach((m) => {
+      if (m.telefono && m.telefono.trim()) setPhones.add(m.telefono.trim());
+    });
+    Object.values(clientes).forEach((c) => {
+      if (c.telefono && c.telefono.trim()) setPhones.add(c.telefono.trim());
+    });
+    return Array.from(setPhones).sort((a, b) => a.localeCompare(b));
+  }, [movs, clientes]);
+
   // Helper to add a movement
   const addMov = async (m: Omit<Movimiento, 'ts' | 'fecha' | 'por'>): Promise<boolean> => {
     const timestamp = Date.now();
@@ -1983,9 +1994,17 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       vuelto = Math.max(0, pagoCon - total);
     }
 
-    // Guardar cliente y teléfono en el directorio si se ingresó
-    if (cliente && tel) {
-      handleGuardarCliente(cliente, tel);
+    // Guardar cliente y teléfono en el directorio (tanto para fiados como compras con pago inmediato)
+    const cleanTel = (tel || '').trim();
+    let clientName = (cliente || '').trim();
+    if (!clientName && cleanTel) {
+      const match = Object.values(clientes).find(
+        (c) => c.telefono && c.telefono.replace(/\s+/g, '') === cleanTel.replace(/\s+/g, '')
+      );
+      clientName = match?.nombre || `Cliente ${cleanTel}`;
+    }
+    if (clientName) {
+      handleGuardarCliente(clientName, cleanTel || undefined);
     }
 
     const ticketId = 'tk_' + Date.now();
@@ -2003,12 +2022,12 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
         cant: it.cant,
         total: itemTotal,
         fiado: isFiado,
-        cliente: isFiado || cliente ? cliente : '',
+        cliente: clientName || (isFiado || cliente ? cliente : ''),
         ticketId,
         medioPago: posMedioPago,
         pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
         vuelto: posMedioPago === 'efectivo' ? vuelto : undefined,
-        telefono: tel || undefined,
+        telefono: cleanTel || undefined,
       });
     }
 
@@ -2022,8 +2041,8 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       medioPago: posMedioPago,
       pagoCon: posMedioPago === 'efectivo' ? pagoCon : undefined,
       vuelto: posMedioPago === 'efectivo' ? vuelto : undefined,
-      cliente: cliente || undefined,
-      telefono: tel || undefined,
+      cliente: clientName || cliente || undefined,
+      telefono: cleanTel || undefined,
       ts: Date.now(),
       fecha: fTs(Date.now()),
       por: miNombre,
@@ -2050,6 +2069,11 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       pagoDetalle = ' (Queda pendiente en saldo deudor)';
     }
 
+    let transferenciaTxt = '';
+    if (ticket.medioPago === 'transferencia') {
+      transferenciaTxt = `\n----------------------------------------\n📌 DATOS PARA TRANSFERENCIA BANCARIA:\nNombre: Benjamin Chavez\nRut: 20.627.873-0\nBanco: Bancoestado\nTipo de cuenta: Cuenta Rut\nMonto a transferir: ${fmt(ticket.total)}\n(Por favor envíanos el comprobante una vez realizada la transferencia)\n----------------------------------------`;
+    }
+
     const texto = `TICKET DE VENTA - VENTAS SCORE ⚡
 ----------------------------------------
 Fecha: ${ticket.fecha}
@@ -2060,7 +2084,7 @@ ${itemsLines}
 ----------------------------------------
 Subtotal: ${fmt(ticket.subtotal)}
 ${ticket.descuento > 0 ? `Descuento: -${fmt(ticket.descuento)}\n` : ''}${ticket.recargo && ticket.recargo > 0 ? `Recargo / Aumento: +${fmt(ticket.recargo)}\n` : ''}TOTAL: ${fmt(ticket.total)}
-Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
+Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt}
 
 ¡Muchas gracias por tu compra en Ventas Score!
 ----------------------------------------`;
@@ -2675,6 +2699,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
       debitoReal: datos.debitoReal,
       fiadoTotal: conc.fiadoTotal,
       mermasTotal: conc.costoMerma,
+      comprasStock: conc.comprasStock,
       diferenciaTotal: difTotal,
       estadoArqueo,
       observaciones: datos.observaciones || undefined,
@@ -2759,7 +2784,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
   const t0 = useMemo(() => getT0(cierres), [cierres]);
   const resumenPeriodo = useMemo(() => calcResumen(movs, productos, t0), [movs, productos, t0]);
   const resumenTotal = useMemo(() => calcResumen(movs, productos, 0), [movs, productos]);
-  const deudoresList = useMemo(() => getDeudores(movs, clientes).filter((d) => d.deuda > 0.5), [movs, clientes]);
+  const deudoresList = useMemo(() => getDeudores(movs, clientes), [movs, clientes]);
   const totalDeudaNum = useMemo(
     () => deudoresList.reduce((s, d) => s + Math.max(0, d.deuda), 0),
     [deudoresList]
@@ -2769,9 +2794,9 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
     let atencion = 0;
     let critico = 0;
     deudoresList.forEach((d) => {
-      const dias = d.diasAntiguedad || 0;
-      if (dias > 15) critico++;
-      else if (dias >= 7) atencion++;
+      if (d.deuda <= 0.5) return;
+      if (d.estadoMorosidad === 'critico') critico++;
+      else if (d.estadoMorosidad === 'atencion') atencion++;
       else alDia++;
     });
     return { alDia, atencion, critico };
@@ -5292,6 +5317,46 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
                   <b style={{ color: '#16a34a' }}>Vuelto: {fmt(modalTicket.vuelto || 0)}</b>
                 </div>
               )}
+              {modalTicket.medioPago === 'transferencia' && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                  }}
+                >
+                  <div style={{ fontWeight: 800, color: '#3b82f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>📌 Datos para Transferencia</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText('Nombre: Benjamin Chavez\nRUT: 20.627.873-0\nBanco: BancoEstado\nTipo de cuenta: Cuenta RUT');
+                        showToast('✓ Datos de transferencia copiados');
+                      }}
+                      style={{
+                        background: 'rgba(59, 130, 246, 0.2)',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '2px 6px',
+                        fontSize: '0.72rem',
+                        cursor: 'pointer',
+                        color: 'var(--text)',
+                      }}
+                    >
+                      📋 Copiar datos
+                    </button>
+                  </div>
+                  <div><b>Nombre:</b> Benjamin Chavez</div>
+                  <div><b>RUT:</b> 20.627.873-0</div>
+                  <div><b>Banco:</b> BancoEstado · <b>Tipo:</b> Cuenta RUT</div>
+                </div>
+              )}
             </div>
 
             {/* ACCIONES: WHATSAPP Y NUEVA VENTA */}
@@ -6692,6 +6757,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}
         posTelefono={posTelefono}
         setPosTelefono={setPosTelefono}
         clientNames={clientNames}
+        clientPhones={clientPhones}
         clientes={clientes}
         onCobrar={handleCobrarCarrito}
       />
