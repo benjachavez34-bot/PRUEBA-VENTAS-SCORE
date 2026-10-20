@@ -1,6 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Sesión persistente del servidor de WhatsApp Central
+    match /whatsapp_session/{docId} {
+      allow read, write: if true;
+    }
+
     // Permite lectura y escritura a cualquier usuario autenticado (Google o Correo/Contraseña)
     match /{document=**} {
       allow read, write: if request.auth != null;

@@ -226,6 +226,9 @@ export const ModalWhatsAppCentral: React.FC<ModalWhatsAppCentralProps> = ({
             {status?.conectado && (
               <div style={{ fontSize: '0.85rem', color: 'var(--text)' }}>
                 Número vinculado: <b style={{ color: '#22c55e' }}>+{status.telefono}</b>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, color: '#38bdf8', fontSize: '0.75rem', fontWeight: 600 }}>
+                  <span>☁️ Sesión guardada en la nube (No se desconectará al reiniciar)</span>
+                </div>
                 <div className="sub" style={{ fontSize: '0.76rem', marginTop: 3 }}>
                   Todos los comprobantes y avisos de cobro salen automáticamente desde este número.
                 </div>
@@ -253,10 +256,10 @@ export const ModalWhatsAppCentral: React.FC<ModalWhatsAppCentralProps> = ({
             }}
           >
             <div style={{ fontWeight: 700, fontSize: '0.92rem', marginBottom: 6 }}>
-              📸 Escanea este código con tu WhatsApp
+              📸 Escanea este código con tu WhatsApp (1 sola vez)
             </div>
             <div className="sub" style={{ fontSize: '0.78rem', marginBottom: 12 }}>
-              Apunta la cámara de WhatsApp desde tu teléfono para vincular la sesión:
+              Apunta la cámara de WhatsApp desde tu teléfono para vincular. La sesión se guardará en Firestore para que no se desconecte nunca más:
             </div>
             <div
               style={{
