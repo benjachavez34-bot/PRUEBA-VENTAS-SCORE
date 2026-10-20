@@ -11,6 +11,7 @@ import {
   getDoc,
   query,
   where,
+  arrayUnion,
 } from 'firebase/firestore';
 import {
   auth,
@@ -314,7 +315,6 @@ export default function App() {
     texto: string;
     avatarId?: string;
   } | null>(null);
-  const [mensajesNoLeidos, setMensajesNoLeidos] = useState<number>(0);
 
   // Lista dinámica de correos administradores autorizados sincronizada en Firestore
   const [adminEmails, setAdminEmails] = useState<string[]>(() => {
@@ -393,6 +393,26 @@ export default function App() {
   });
   const [editPerfil, setEditPerfil] = useState<PerfilUsuario>(perfil);
   const [mostrarPin, setMostrarPin] = useState<boolean>(false);
+
+  // Conteo reactivo de mensajes no leídos para el usuario actual
+  const mensajesNoLeidos = useMemo(() => {
+    const myEmail = (user?.email || perfil.email || '').toLowerCase().trim();
+    if (!myEmail) return 0;
+
+    return mensajes.filter((m) => {
+      const de = (m.deEmail || '').toLowerCase().trim();
+      if (de === myEmail) return false;
+
+      const para = (m.paraEmail || '').toLowerCase().trim();
+      if (para && para !== myEmail) return false;
+
+      if (m.leidoPor && Array.isArray(m.leidoPor)) {
+        return !m.leidoPor.map((e) => e.toLowerCase().trim()).includes(myEmail);
+      }
+      if (para === myEmail && m.leido) return false;
+      return true;
+    }).length;
+  }, [mensajes, user?.email, perfil.email]);
 
   // Evaluaciones y calificaciones profesionales del equipo de ventas
   const [evaluaciones, setEvaluaciones] = useState<Record<string, EvaluacionVendedor>>(() => {
@@ -855,10 +875,7 @@ export default function App() {
                 setInAppBanner((curr) => (curr?.texto === newMsg.texto ? null : curr));
               }, 6500);
 
-              // 2. Incrementar badge de no leídos
-              setMensajesNoLeidos((prev) => prev + 1);
-
-              // 3. Reproducir sonido y disparar notificación web/sistema
+              // 2. Reproducir sonido y disparar notificación web/sistema
               showBrowserNotification(
                 `💬 ${notifLabel}:`,
                 newMsg.texto || 'Nuevo mensaje en Ventas Score'
@@ -2970,6 +2987,8 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
       tipo,
       ...(cleanParaEmail ? { paraEmail: cleanParaEmail, paraNombre, canalId } : { canalId: 'general' }),
       ...(adjunto ? { adjunto } : {}),
+      leidoPor: [myEmail],
+      leido: false,
     };
 
     if (isGuest) {
@@ -3006,6 +3025,64 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
       );
     } catch (e: any) {
       alert('No se pudo enviar el mensaje: ' + (e?.message || e));
+    }
+  };
+
+  // Función para marcar mensajes como leídos
+  const handleMarcarMensajesComoLeidos = async (msgIds: string[]) => {
+    const myEmail = (user?.email || perfil.email || '').toLowerCase().trim();
+    if (!myEmail || !msgIds || msgIds.length === 0) return;
+
+    // 1. Filtrar solo los mensajes que no tengan aún a myEmail en leidoPor
+    const pendientes = mensajes.filter((m) => {
+      if (!m.id || !msgIds.includes(m.id)) return false;
+      const leidos = (m.leidoPor || []).map((e) => e.toLowerCase().trim());
+      return !leidos.includes(myEmail);
+    });
+
+    if (pendientes.length === 0) return;
+    const idsToUpdate = pendientes.map((m) => m.id!);
+
+    // 2. Actualizar estado local reactivo
+    setMensajes((prev) =>
+      prev.map((m) => {
+        if (m.id && idsToUpdate.includes(m.id)) {
+          const list = m.leidoPor ? [...m.leidoPor] : [];
+          if (!list.map((e) => e.toLowerCase().trim()).includes(myEmail)) {
+            list.push(myEmail);
+          }
+          return {
+            ...m,
+            leidoPor: list,
+            leido: true,
+            leidoEn: Date.now(),
+          };
+        }
+        return m;
+      })
+    );
+
+    // 3. Guardar en localStorage
+    try {
+      const stored = JSON.parse(localStorage.getItem('chat_leidos_ids') || '[]');
+      const merged = Array.from(new Set([...stored, ...idsToUpdate]));
+      localStorage.setItem('chat_leidos_ids', JSON.stringify(merged));
+    } catch {}
+
+    // 4. Actualizar en Firestore para sincronizar estado de lectura con el emisor en tiempo real
+    if (!isGuest && db) {
+      for (const id of idsToUpdate) {
+        try {
+          const ref = doc(db, 'mensajes', id);
+          await updateDoc(ref, {
+            leidoPor: arrayUnion(myEmail),
+            leido: true,
+            leidoEn: Date.now(),
+          });
+        } catch (err) {
+          console.warn('Error actualizando leído en Firestore:', err);
+        }
+      }
     }
   };
 
@@ -4189,23 +4266,30 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
               className={`tab ${activeTab === 'miembros' ? 'active' : ''}`}
               onClick={() => {
                 setActiveTab('miembros');
-                setMensajesNoLeidos(0);
                 setInAppBanner(null);
               }}
               style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
               <span>💬 Equipo</span>
-              {mensajesNoLeidos > 0 && activeTab !== 'miembros' && (
+              {mensajesNoLeidos > 0 && (
                 <span
+                  className="badge-unread-pulse"
                   style={{
                     background: '#ef4444',
-                    color: '#fff',
+                    color: '#ffffff',
                     fontSize: '0.68rem',
-                    fontWeight: 800,
-                    padding: '1px 6px',
+                    fontWeight: 900,
+                    minWidth: 19,
+                    height: 19,
+                    padding: '0 5px',
                     borderRadius: 10,
-                    boxShadow: '0 0 8px rgba(239,68,68,0.8)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 10px rgba(239, 68, 68, 0.95), 0 2px 4px rgba(0, 0, 0, 0.3)',
+                    border: '1.5px solid var(--card)',
                   }}
+                  title={`${mensajesNoLeidos} mensaje(s) nuevo(s) sin leer`}
                 >
                   {mensajesNoLeidos}
                 </span>
@@ -4689,6 +4773,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
                   adminEmails={adminEmails}
                   onToggleAdminMember={handleToggleAdminMember}
                   onEnviarMensaje={handleEnviarMensaje}
+                  onMarcarLeidos={handleMarcarMensajesComoLeidos}
                   onOpenMiCuenta={() => {
                     setEditPerfil(perfil);
                     setModalCuentaOpen(true);
@@ -4776,16 +4861,17 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
               className={`bottom-nav-item ${activeTab === 'miembros' ? 'active' : ''}`}
               onClick={() => {
                 setActiveTab('miembros');
-                setMensajesNoLeidos(0);
                 setInAppBanner(null);
               }}
               style={{ position: 'relative' }}
             >
-              <span className="bottom-nav-icon">💬</span>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <span className="bottom-nav-icon">💬</span>
+                {mensajesNoLeidos > 0 && (
+                  <span className="bottom-nav-badge">{mensajesNoLeidos}</span>
+                )}
+              </div>
               <span className="bottom-nav-label">Equipo</span>
-              {mensajesNoLeidos > 0 && activeTab !== 'miembros' && (
-                <span className="bottom-nav-badge">{mensajesNoLeidos}</span>
-              )}
             </button>
 
             <button
@@ -6557,7 +6643,6 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
           onClick={() => {
             setActiveTab('miembros');
             setInAppBanner(null);
-            setMensajesNoLeidos(0);
           }}
         >
           <img
@@ -6673,6 +6758,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
         userName={perfil.nombre || miNombre}
         userRole={perfil.rol}
         avatarId={perfil.avatarId}
+        mensajesNoLeidos={mensajesNoLeidos}
         onOpenMiCuenta={() => {
           setEditPerfil(perfil);
           setModalCuentaOpen(true);

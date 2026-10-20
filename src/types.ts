@@ -244,6 +244,9 @@ export interface MensajeChat {
   paraNombre?: string;
   canalId?: string;
   adjunto?: AdjuntoChat;
+  leidoPor?: string[];
+  leido?: boolean;
+  leidoEn?: number;
 }
 
 export interface EvaluacionCriterios {

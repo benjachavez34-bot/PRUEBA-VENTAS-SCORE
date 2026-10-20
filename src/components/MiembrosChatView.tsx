@@ -24,6 +24,7 @@ interface MiembrosChatViewProps {
     paraNombre?: string,
     adjunto?: AdjuntoChat
   ) => Promise<void>;
+  onMarcarLeidos?: (msgIds: string[]) => Promise<void>;
   onOpenMiCuenta: () => void;
 }
 
@@ -138,6 +139,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
   adminEmails,
   onToggleAdminMember,
   onEnviarMensaje,
+  onMarcarLeidos,
   onOpenMiCuenta,
 }) => {
   const [subVista, setSubVista] = useState<'miembros' | 'chat'>('miembros');
@@ -423,9 +425,42 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     });
   }, [mensajes, isDirectChat, targetDmEmail, myEmail]);
 
+  // Helper para saber si un mensaje está no leído por el usuario actual
+  const esMensajeNoLeido = (m: MensajeChat) => {
+    const de = (m.deEmail || '').toLowerCase().trim();
+    if (de === myEmail) return false;
+    const para = (m.paraEmail || '').toLowerCase().trim();
+    if (para && para !== myEmail) return false;
+    if (m.leidoPor && Array.isArray(m.leidoPor)) {
+      return !m.leidoPor.map((e) => e.toLowerCase().trim()).includes(myEmail);
+    }
+    if (para === myEmail && m.leido) return false;
+    return true;
+  };
+
   const countMensajesGenerales = React.useMemo(() => {
     return mensajes.filter((m) => !m.paraEmail || m.canalId === 'general').length;
   }, [mensajes]);
+
+  // Mensajes no leídos en el canal general
+  const noLeidosGenerales = React.useMemo(() => {
+    return mensajes.filter((m) => (!m.paraEmail || m.canalId === 'general') && esMensajeNoLeido(m)).length;
+  }, [mensajes, myEmail]);
+
+  // Mensajes no leídos de un miembro en particular
+  const noLeidosDeMiembro = (email: string) => {
+    const clean = email.toLowerCase().trim();
+    return mensajes.filter((m) => {
+      const de = (m.deEmail || '').toLowerCase().trim();
+      const para = (m.paraEmail || '').toLowerCase().trim();
+      return de === clean && (!para || para === myEmail) && esMensajeNoLeido(m);
+    }).length;
+  };
+
+  // Total de mensajes no leídos
+  const totalNoLeidos = React.useMemo(() => {
+    return mensajes.filter((m) => esMensajeNoLeido(m)).length;
+  }, [mensajes, myEmail]);
 
   const countMensajesDirectos = (email: string) => {
     const clean = email.toLowerCase().trim();
@@ -470,6 +505,19 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
       chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [mensajesFiltrados, subVista, activeChatChannel]);
+
+  // Marcar automáticamente mensajes como leídos cuando el usuario está en la vista de chat
+  useEffect(() => {
+    if (subVista !== 'chat' || !onMarcarLeidos) return;
+
+    const unreadIds = mensajesFiltrados
+      .filter((m) => m.id && esMensajeNoLeido(m))
+      .map((m) => m.id!);
+
+    if (unreadIds.length > 0) {
+      onMarcarLeidos(unreadIds);
+    }
+  }, [subVista, activeChatChannel, mensajesFiltrados, onMarcarLeidos]);
 
   const handleInsertEmoji = (emoji: string) => {
     const input = mensajeInputRef.current;
@@ -620,10 +668,30 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
             <button
               type="button"
               className={subVista === 'chat' ? 'btn-primary' : 'btn-ghost'}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', fontSize: '0.88rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', fontSize: '0.88rem', position: 'relative' }}
               onClick={() => setSubVista('chat')}
             >
-              💬 Chat & Indicaciones ({mensajes.length})
+              <span>💬 Chat & Indicaciones ({mensajes.length})</span>
+              {totalNoLeidos > 0 && (
+                <span
+                  className="badge-unread-pulse"
+                  style={{
+                    background: '#ef4444',
+                    color: '#fff',
+                    fontSize: '0.68rem',
+                    fontWeight: 900,
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 5px',
+                    borderRadius: 10,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {totalNoLeidos}
+                </span>
+              )}
             </button>
           </div>
 
@@ -980,13 +1048,36 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                             fontSize: '0.78rem',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 4,
+                            gap: 5,
                             fontWeight: 700,
+                            position: 'relative',
+                            background: noLeidosDeMiembro(m.email) > 0 ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : undefined,
+                            boxShadow: noLeidosDeMiembro(m.email) > 0 ? '0 0 10px rgba(239, 68, 68, 0.5)' : undefined,
                           }}
                           onClick={() => handleIniciarChatDirecto(m.email)}
                           title={`Iniciar conversación directa con ${m.nombre}`}
                         >
-                          💬 Mensaje
+                          <span>💬 Mensaje</span>
+                          {noLeidosDeMiembro(m.email) > 0 && (
+                            <span
+                              className="badge-unread-pulse"
+                              style={{
+                                background: '#ffffff',
+                                color: '#dc2626',
+                                fontSize: '0.65rem',
+                                fontWeight: 900,
+                                padding: '0 4px',
+                                borderRadius: 8,
+                                minWidth: 16,
+                                height: 16,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {noLeidosDeMiembro(m.email)}
+                            </span>
+                          )}
                         </button>
                       )}
                     </div>
@@ -1078,24 +1169,42 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
               >
                 <span>📢</span>
                 <span>Chat General & Anuncios</span>
-                <span
-                  style={{
-                    fontSize: '0.68rem',
-                    padding: '1px 6px',
-                    borderRadius: 10,
-                    background: activeChatChannel === 'general' ? 'rgba(255,255,255,0.28)' : 'var(--border)',
-                    color: activeChatChannel === 'general' ? '#ffffff' : 'var(--muted)',
-                    fontWeight: 700,
-                  }}
-                >
-                  {countMensajesGenerales}
-                </span>
+                {noLeidosGenerales > 0 ? (
+                  <span
+                    className="badge-unread-pulse"
+                    style={{
+                      fontSize: '0.68rem',
+                      padding: '1px 6px',
+                      borderRadius: 10,
+                      background: '#ef4444',
+                      color: '#ffffff',
+                      fontWeight: 900,
+                      boxShadow: '0 0 8px rgba(239, 68, 68, 0.8)',
+                    }}
+                  >
+                    {noLeidosGenerales}
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      padding: '1px 6px',
+                      borderRadius: 10,
+                      background: activeChatChannel === 'general' ? 'rgba(255,255,255,0.28)' : 'var(--border)',
+                      color: activeChatChannel === 'general' ? '#ffffff' : 'var(--muted)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {countMensajesGenerales}
+                  </span>
+                )}
               </button>
 
               {/* CHATS DIRECTOS ACTIVOS (INICIADOS POR CLICK EN 'MENSAJE' O MENSAJES PREVIOS) */}
               {activeDmMembers.map((m) => {
                 const isAct = activeChatChannel === m.email.toLowerCase().trim();
                 const countDm = countMensajesDirectos(m.email);
+                const unreadDm = noLeidosDeMiembro(m.email);
                 return (
                   <div
                     key={m.email}
@@ -1131,7 +1240,22 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                       referrerPolicy="no-referrer"
                     />
                     <span>{m.nombre}</span>
-                    {countDm > 0 && (
+                    {unreadDm > 0 ? (
+                      <span
+                        className="badge-unread-pulse"
+                        style={{
+                          fontSize: '0.68rem',
+                          padding: '1px 6px',
+                          borderRadius: 10,
+                          background: '#ef4444',
+                          color: '#ffffff',
+                          fontWeight: 900,
+                          boxShadow: '0 0 8px rgba(239, 68, 68, 0.8)',
+                        }}
+                      >
+                        {unreadDm}
+                      </span>
+                    ) : countDm > 0 ? (
                       <span
                         style={{
                           fontSize: '0.68rem',
@@ -1144,7 +1268,7 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                       >
                         {countDm}
                       </span>
-                    )}
+                    ) : null}
                     <button
                       type="button"
                       onClick={(e) => handleCerrarChatDirecto(m.email, e)}
@@ -1533,9 +1657,56 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
                             📢 INDICACIÓN
                           </span>
                         )}
-                        <span className="sub" style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>
-                          {fTs(msg.ts)}
-                        </span>
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span className="sub" style={{ fontSize: '0.68rem' }}>
+                            {fTs(msg.ts)}
+                          </span>
+                          {esMio ? (
+                            (() => {
+                              const isMsgRead = Boolean(
+                                msg.leido ||
+                                (isDirectChat
+                                  ? targetDmEmail && msg.leidoPor?.map((e) => e.toLowerCase().trim()).includes(targetDmEmail)
+                                  : (msg.leidoPor || []).some((e) => e.toLowerCase().trim() !== myEmail))
+                              );
+                              return (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                    fontWeight: 800,
+                                    fontSize: '0.78rem',
+                                    color: isMsgRead ? '#0284c7' : 'var(--muted)',
+                                  }}
+                                  title={
+                                    isMsgRead
+                                      ? isDirectChat
+                                        ? `Leído por ${targetDmMember?.nombre || 'destinatario'}`
+                                        : 'Leído en el equipo'
+                                      : 'Enviado (pendiente de lectura)'
+                                  }
+                                >
+                                  {isMsgRead ? '✓✓' : '✓'}
+                                </span>
+                              );
+                            })()
+                          ) : esMensajeNoLeido(msg) ? (
+                            <span
+                              style={{
+                                background: '#ef4444',
+                                color: '#ffffff',
+                                fontSize: '0.58rem',
+                                fontWeight: 900,
+                                padding: '1px 4px',
+                                borderRadius: 4,
+                                letterSpacing: '0.5px',
+                              }}
+                            >
+                              NUEVO
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
 
                       {/* Adjunto si existe (Foto o Archivo) */}

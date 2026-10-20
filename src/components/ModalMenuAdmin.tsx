@@ -10,6 +10,7 @@ interface ModalMenuAdminProps {
   userName: string;
   userRole?: string;
   avatarId?: string;
+  mensajesNoLeidos?: number;
   onOpenMiCuenta: () => void;
   onLogout: () => void;
 }
@@ -23,6 +24,7 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
   userName,
   userRole,
   avatarId,
+  mensajesNoLeidos = 0,
   onOpenMiCuenta,
   onLogout,
 }) => {
@@ -231,6 +233,66 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                     </div>
                     <div className="sub" style={{ fontSize: '0.75rem' }}>
                       Métricas, calificaciones y efectividad de cobranza
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>→</span>
+              </button>
+
+              {/* CHAT & INDICACIONES DE EQUIPO */}
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => handleSelect('miembros')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  background:
+                    activeTab === 'miembros'
+                      ? 'rgba(37, 99, 235, 0.15)'
+                      : 'rgba(0, 0, 0, 0.05)',
+                  border: `1px solid ${
+                    activeTab === 'miembros'
+                      ? 'var(--accent)'
+                      : 'var(--border)'
+                  }`,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  width: '100%',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: '1.35rem' }}>💬</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>Chat & Directorio de Equipo</span>
+                      {mensajesNoLeidos > 0 && (
+                        <span
+                          className="badge-unread-pulse"
+                          style={{
+                            background: '#ef4444',
+                            color: '#ffffff',
+                            fontSize: '0.68rem',
+                            fontWeight: 900,
+                            minWidth: 18,
+                            height: 18,
+                            padding: '0 5px',
+                            borderRadius: 10,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 0 8px rgba(239, 68, 68, 0.9)',
+                          }}
+                        >
+                          {mensajesNoLeidos}
+                        </span>
+                      )}
+                    </div>
+                    <div className="sub" style={{ fontSize: '0.75rem' }}>
+                      Canal general, indicaciones del administrador y mensajes directos
                     </div>
                   </div>
                 </div>
