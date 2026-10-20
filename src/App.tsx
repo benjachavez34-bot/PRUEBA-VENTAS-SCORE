@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   collection,
   doc,
@@ -3029,7 +3029,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
   };
 
   // Función para marcar mensajes como leídos
-  const handleMarcarMensajesComoLeidos = async (msgIds: string[]) => {
+  const handleMarcarMensajesComoLeidos = useCallback(async (msgIds: string[]) => {
     const myEmail = (user?.email || perfil.email || '').toLowerCase().trim();
     if (!myEmail || !msgIds || msgIds.length === 0) return;
 
@@ -3084,7 +3084,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
         }
       }
     }
-  };
+  }, [user?.email, perfil.email, isGuest, db, mensajes]);
 
   // Función exclusiva del Administrador Principal (Benjamín Chávez) para gestionar autorizaciones
   const handleToggleAdminMember = async (targetEmail: string, makeAdmin: boolean) => {
@@ -6814,6 +6814,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
         setMonto={setDMonto}
         productos={productos}
         clientNames={clientNames}
+        clientPhones={clientPhones}
         stockDe={(id) => stockDe(id, movs)}
         handleProductoChange={handleDProductoChange}
         handleCantidadChange={handleDCantidadChange}

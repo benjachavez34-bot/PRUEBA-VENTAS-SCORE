@@ -506,15 +506,19 @@ export const MiembrosChatView: React.FC<MiembrosChatViewProps> = ({
     }
   }, [mensajesFiltrados, subVista, activeChatChannel]);
 
+  // Cache de IDs marcados como leídos en la sesión para evitar llamadas redundantes
+  const markedIdsRef = useRef<Set<string>>(new Set());
+
   // Marcar automáticamente mensajes como leídos cuando el usuario está en la vista de chat
   useEffect(() => {
     if (subVista !== 'chat' || !onMarcarLeidos) return;
 
     const unreadIds = mensajesFiltrados
-      .filter((m) => m.id && esMensajeNoLeido(m))
+      .filter((m) => m.id && esMensajeNoLeido(m) && !markedIdsRef.current.has(m.id))
       .map((m) => m.id!);
 
     if (unreadIds.length > 0) {
+      unreadIds.forEach((id) => markedIdsRef.current.add(id));
       onMarcarLeidos(unreadIds);
     }
   }, [subVista, activeChatChannel, mensajesFiltrados, onMarcarLeidos]);

@@ -20,6 +20,7 @@ interface ModalNuevaDeudaProps {
   setMonto: (val: string) => void;
   productos: Producto[];
   clientNames: string[];
+  clientPhones?: string[];
   stockDe: (id: string) => number;
   handleProductoChange: (id: string) => void;
   handleCantidadChange: (val: string) => void;
@@ -42,6 +43,7 @@ export const ModalNuevaDeuda: React.FC<ModalNuevaDeudaProps> = ({
   setMonto,
   productos,
   clientNames,
+  clientPhones = [],
   stockDe,
   handleProductoChange,
   handleCantidadChange,
@@ -140,9 +142,26 @@ export const ModalNuevaDeuda: React.FC<ModalNuevaDeudaProps> = ({
                 onChange={(e) => {
                   const val = e.target.value;
                   setNombre(val);
-                  const k = val.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                  if (clientes[k]?.telefono && (!telefono || telefono === '+56 9 ')) {
-                    setTelefono(clientes[k].telefono || '');
+                  const normVal = val
+                    .trim()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z0-9]/g, '');
+
+                  if (normVal) {
+                    const match = Object.values(clientes).find((c) => {
+                      const cNorm = c.nombre
+                        .trim()
+                        .toLowerCase()
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/[^a-z0-9]/g, '');
+                      return cNorm === normVal || (c.id && c.id.toLowerCase() === normVal);
+                    });
+                    if (match?.telefono && (!telefono || telefono === '+56 9 ')) {
+                      setTelefono(match.telefono);
+                    }
                   }
                 }}
                 style={{ fontSize: '0.88rem' }}
@@ -161,10 +180,16 @@ export const ModalNuevaDeuda: React.FC<ModalNuevaDeudaProps> = ({
               <input
                 type="tel"
                 placeholder="+56 9..."
+                list="listaTelefonosModalDeuda"
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
                 style={{ fontSize: '0.88rem' }}
               />
+              <datalist id="listaTelefonosModalDeuda">
+                {clientPhones.map((ph) => (
+                  <option key={ph} value={ph} />
+                ))}
+              </datalist>
             </div>
           </div>
 

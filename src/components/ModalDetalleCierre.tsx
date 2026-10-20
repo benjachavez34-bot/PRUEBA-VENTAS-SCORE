@@ -198,6 +198,14 @@ export const ModalDetalleCierre: React.FC<ModalDetalleCierreProps> = ({
                 {fmt(cierre.enCuenta)}
               </div>
             </div>
+            {Boolean(cierre.comprasStock && cierre.comprasStock > 0) && (
+              <div style={{ background: 'var(--bg)', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.35)' }}>
+                <span className="sub" style={{ color: 'var(--accent2)' }}>Compras stock (caja):</span>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--accent2)' }}>
+                  -{fmt(cierre.comprasStock!)}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -226,7 +234,14 @@ export const ModalDetalleCierre: React.FC<ModalDetalleCierreProps> = ({
                 </thead>
                 <tbody>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 600 }}>💵 Efectivo</td>
+                    <td style={{ padding: '8px 10px', fontWeight: 600 }}>
+                      💵 Efectivo
+                      {Boolean(cierre.comprasStock && cierre.comprasStock > 0) && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--sub)', fontWeight: 400, marginTop: 2 }}>
+                          (Desc. compras stock: -{fmt(cierre.comprasStock!)})
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(efEsp)}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmt(efReal)}</td>
                     <td
