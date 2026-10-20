@@ -1214,6 +1214,26 @@ Saldo restante: ${fmt(saldoRestante)}
 ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu pago.' : 'Agradecemos tu puntual abono!'}
 ----------------------------------------`;
 
+    const cfg = getWhatsAppCentralConfig();
+    if (cfg.serverUrl && tel && tel.replace(/\D/g, '').length >= 8) {
+      showToast(`Enviando comprobante de abono por WhatsApp Central a ${nombre}...`);
+      enviarWhatsAppCentral(tel, texto).then((res) => {
+        if (res.ok) {
+          showToast(`✓ Comprobante de abono enviado con éxito por WhatsApp Central al ${tel}`);
+        } else {
+          showToast(`⚠️ No se pudo enviar por WhatsApp Central: ${res.error || 'error'}. Abriendo WhatsApp...`, 'debt');
+          let cleanPhone = tel!.replace(/\D/g, '');
+          if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+            cleanPhone = '56' + cleanPhone;
+          } else if (cleanPhone.length === 8) {
+            cleanPhone = '569' + cleanPhone;
+          }
+          window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(texto)}`, '_blank');
+        }
+      }).catch(() => {});
+      return;
+    }
+
     if (tel && tel.replace(/\D/g, '').length >= 8) {
       let cleanPhone = tel.replace(/\D/g, '');
       if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
@@ -2038,13 +2058,21 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     }
 
     // Guardar cliente y teléfono en el directorio (tanto para fiados como compras con pago inmediato)
-    const cleanTel = (tel || '').trim();
+    let cleanTel = (tel || '').trim();
     let clientName = (cliente || '').trim();
     if (!clientName && cleanTel) {
       const match = Object.values(clientes).find(
         (c) => c.telefono && c.telefono.replace(/\s+/g, '') === cleanTel.replace(/\s+/g, '')
       );
       clientName = match?.nombre || `Cliente ${cleanTel}`;
+    }
+    // Si tenemos nombre de cliente pero el teléfono no se tipeó en el mostrador, buscarlo en el directorio
+    if (!cleanTel && clientName) {
+      const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+      const match = Object.values(clientes).find((c) => norm(c.nombre) === norm(clientName));
+      if (match?.telefono) {
+        cleanTel = match.telefono.trim();
+      }
     }
     if (clientName) {
       handleGuardarCliente(clientName, cleanTel || undefined);
@@ -2101,11 +2129,16 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       const cfg = getWhatsAppCentralConfig();
       if (cfg.serverUrl && cfg.autoSend) {
         const txt = generarTextoTicketWhatsApp(ticketObj);
+        showToast(`Enviando comprobante por WhatsApp Central a ${ticketObj.cliente || 'cliente'}...`);
         enviarWhatsAppCentral(cleanTel, txt).then((res) => {
           if (res.ok) {
             showToast(`✓ Comprobante enviado automáticamente por WhatsApp Central al ${cleanTel}`);
+          } else {
+            showToast(`⚠️ No se pudo enviar por WhatsApp Central: ${res.error || 'error'}`, 'debt');
           }
-        }).catch(() => {});
+        }).catch(() => {
+          showToast('⚠️ Error conectando con WhatsApp Central', 'debt');
+        });
       }
     }
   };
@@ -2143,17 +2176,27 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
   };
 
   const handleEnviarTicketWhatsApp = async (ticket: TicketVenta) => {
-    const docKey = (ticket.cliente || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-    const tel = ticket.telefono || clientes[docKey]?.telefono;
+    let tel = ticket.telefono;
+    if (!tel && ticket.cliente) {
+      const docKey = ticket.cliente.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]/g, '_');
+      tel = clientes[docKey]?.telefono;
+      if (!tel) {
+        const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+        const matchCli = Object.values(clientes).find((c) => norm(c.nombre) === norm(ticket.cliente!));
+        if (matchCli?.telefono) tel = matchCli.telefono;
+      }
+    }
     const texto = generarTextoTicketWhatsApp(ticket);
 
     const cfg = getWhatsAppCentralConfig();
     if (cfg.serverUrl && tel && tel.replace(/\D/g, '').length >= 8) {
-      showToast('Enviando comprobante por WhatsApp Central...');
+      showToast(`Enviando comprobante por WhatsApp Central a ${ticket.cliente || 'cliente'}...`);
       const res = await enviarWhatsAppCentral(tel, texto);
       if (res.ok) {
-        showToast('✓ Comprobante enviado con éxito por WhatsApp Central');
-        return;
+        showToast(`✓ Comprobante enviado con éxito por WhatsApp Central al ${tel}`);
+        return; // ¡IMPORTANTE: nunca abre el WhatsApp personal si se despachó!
+      } else {
+        showToast(`⚠️ No se pudo enviar por WhatsApp Central: ${res.error || 'error'}. Abriendo WhatsApp...`, 'debt');
       }
     }
 
@@ -5169,6 +5212,27 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
                   await handleGuardarCliente(modalCliente.nombre, tel, lim);
 
                   if (modalCliente.autoOpenWhatsApp && modalCliente.mensajeWhatsApp) {
+                    const cfg = getWhatsAppCentralConfig();
+                    if (cfg.serverUrl && tel && tel.replace(/\D/g, '').length >= 8) {
+                      showToast(`Enviando por WhatsApp Central al ${tel}...`);
+                      enviarWhatsAppCentral(tel, modalCliente.mensajeWhatsApp).then((res) => {
+                        if (res.ok) {
+                          showToast(`✓ Enviado con éxito por WhatsApp Central al ${tel}`);
+                        } else {
+                          showToast(`⚠️ No se pudo enviar por WhatsApp Central: ${res.error || 'error'}. Abriendo WhatsApp...`, 'debt');
+                          let cleanPhone = tel.replace(/\D/g, '');
+                          if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+                            cleanPhone = '56' + cleanPhone;
+                          } else if (cleanPhone.length === 8) {
+                            cleanPhone = '569' + cleanPhone;
+                          }
+                          window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(modalCliente.mensajeWhatsApp!)}`, '_blank');
+                        }
+                      }).catch(() => {});
+                      setModalCliente((prev) => ({ ...prev, isOpen: false }));
+                      return;
+                    }
+
                     let cleanPhone = tel.replace(/\D/g, '');
                     if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
                       cleanPhone = '56' + cleanPhone;
@@ -5182,7 +5246,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
                   setModalCliente((prev) => ({ ...prev, isOpen: false }));
                 }}
               >
-                {modalCliente.autoOpenWhatsApp ? '💾 Guardar y Abrir WhatsApp' : '💾 Guardar Contacto'}
+                {modalCliente.autoOpenWhatsApp ? '💾 Guardar y Enviar' : '💾 Guardar Contacto'}
               </button>
             </div>
           </div>
@@ -5502,10 +5566,10 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
               <button
                 type="button"
                 style={{
-                  background: '#25D366',
+                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
                   color: '#ffffff',
                   border: 'none',
-                  padding: '10px 16px',
+                  padding: '11px 16px',
                   borderRadius: 8,
                   fontWeight: 700,
                   fontSize: '0.92rem',
@@ -5514,11 +5578,32 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
                   justifyContent: 'center',
                   gap: 8,
                   cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(37,211,102,0.3)',
+                  boxShadow: '0 4px 12px rgba(22,163,74,0.3)',
                 }}
                 onClick={() => handleEnviarTicketWhatsApp(modalTicket)}
               >
-                <span>💬 Enviar Ticket por WhatsApp</span>
+                <span>📱 Enviar Comprobante por WhatsApp Central</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  if (!modalTicket) return;
+                  const texto = generarTextoTicketWhatsApp(modalTicket);
+                  const tel = modalTicket.telefono;
+                  if (tel && tel.replace(/\D/g, '').length >= 8) {
+                    let cleanPhone = tel.replace(/\D/g, '');
+                    if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) cleanPhone = '56' + cleanPhone;
+                    else if (cleanPhone.length === 8) cleanPhone = '569' + cleanPhone;
+                    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(texto)}`, '_blank');
+                  } else {
+                    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+                  }
+                }}
+                style={{ fontSize: '0.78rem', color: 'var(--sub)', padding: '4px' }}
+              >
+                💬 O abrir en mi WhatsApp personal
               </button>
 
               <button
