@@ -73,6 +73,11 @@ import { ModalCheckoutPOS } from './components/ModalCheckoutPOS';
 import { ClientesCobranzasView } from './components/ClientesCobranzasView';
 import { InventarioStockView } from './components/InventarioStockView';
 import { identifyProductByBarcode } from './utils/barcodeCatalog';
+import { ModalWhatsAppCentral } from './components/ModalWhatsAppCentral';
+import {
+  getWhatsAppCentralConfig,
+  enviarWhatsAppCentral,
+} from './utils/whatsappCentral';
 import {
   initializePushNotifications,
   showBrowserNotification,
@@ -583,6 +588,7 @@ export default function App() {
   const [modalNuevoProductoOpen, setModalNuevoProductoOpen] = useState<boolean>(false);
   const [modalNuevaDeudaOpen, setModalNuevaDeudaOpen] = useState<boolean>(false);
   const [modalCheckoutOpen, setModalCheckoutOpen] = useState<boolean>(false);
+  const [modalWhatsAppCentralOpen, setModalWhatsAppCentralOpen] = useState<boolean>(false);
   const [busquedaPos, setBusquedaPos] = useState<string>('');
 
   // Modal Entrada de Mercadería
@@ -1135,6 +1141,26 @@ Banco: Bancoestado
 Tipo de cuenta: Cuenta Rut
 
 Por favor envianos el comprobante cuando realices la transferencia para actualizar tu cuenta de inmediato. Muchas gracias!`;
+
+    const cfg = getWhatsAppCentralConfig();
+    if (cfg.serverUrl && tel && tel.replace(/\D/g, '').length >= 8) {
+      showToast('Enviando recordatorio por WhatsApp Central...');
+      enviarWhatsAppCentral(tel, mensaje).then((res) => {
+        if (res.ok) {
+          showToast(`✓ Recordatorio enviado con éxito a ${d.nombre} por WhatsApp Central`);
+        } else {
+          showToast('No se pudo enviar por WhatsApp Central, abriendo chat...', 'debt');
+          let cleanPhone = tel!.replace(/\D/g, '');
+          if (cleanPhone.length === 9 && cleanPhone.startsWith('9')) {
+            cleanPhone = '56' + cleanPhone;
+          } else if (cleanPhone.length === 8) {
+            cleanPhone = '569' + cleanPhone;
+          }
+          window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(mensaje)}`, '_blank');
+        }
+      }).catch(() => {});
+      return;
+    }
 
     if (tel && tel.replace(/\D/g, '').length >= 8) {
       let cleanPhone = tel.replace(/\D/g, '');
@@ -2069,12 +2095,22 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
     setModalTicket(ticketObj);
     setModalCheckoutOpen(false);
     showToast(`✓ Venta de ${fmt(total)} registrada con éxito`);
+
+    // Despacho desatendido automático vía WhatsApp Central
+    if (cleanTel && cleanTel.replace(/\D/g, '').length >= 8) {
+      const cfg = getWhatsAppCentralConfig();
+      if (cfg.serverUrl && cfg.autoSend) {
+        const txt = generarTextoTicketWhatsApp(ticketObj);
+        enviarWhatsAppCentral(cleanTel, txt).then((res) => {
+          if (res.ok) {
+            showToast(`✓ Comprobante enviado automáticamente por WhatsApp Central al ${cleanTel}`);
+          }
+        }).catch(() => {});
+      }
+    }
   };
 
-  const handleEnviarTicketWhatsApp = (ticket: TicketVenta) => {
-    const docKey = (ticket.cliente || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-    const tel = ticket.telefono || clientes[docKey]?.telefono;
-
+  const generarTextoTicketWhatsApp = (ticket: TicketVenta): string => {
     const itemsLines = ticket.items
       .map((it) => `- ${it.cant}x ${it.producto.nombre} (${fmt(it.precioUnit)} c/u): ${fmt(it.subtotal)}`)
       .join('\n');
@@ -2091,12 +2127,11 @@ ${saldoRestante <= 0 ? 'Tu cuenta ha quedado 100% al dia! Muchas gracias por tu 
       transferenciaTxt = `\n----------------------------------------\n📌 DATOS PARA TRANSFERENCIA BANCARIA:\nNombre: Benjamin Chavez\nRut: 20.627.873-0\nBanco: Bancoestado\nTipo de cuenta: Cuenta Rut\nMonto a transferir: ${fmt(ticket.total)}\n(Por favor envíanos el comprobante una vez realizada la transferencia)\n----------------------------------------`;
     }
 
-    const texto = `TICKET DE VENTA - VENTAS SCORE ⚡
+    return `TICKET DE VENTA - VENTAS SCORE ⚡
 ----------------------------------------
 Fecha: ${ticket.fecha}
 Atendido por: ${ticket.por}
-${ticket.cliente ? `Cliente: ${ticket.cliente}\n` : ''}
-PRODUCTOS:
+${ticket.cliente ? `Cliente: ${ticket.cliente}\n` : ''}PRODUCTOS:
 ${itemsLines}
 ----------------------------------------
 Subtotal: ${fmt(ticket.subtotal)}
@@ -2105,6 +2140,22 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
 
 ¡Muchas gracias por tu compra en Ventas Score!
 ----------------------------------------`;
+  };
+
+  const handleEnviarTicketWhatsApp = async (ticket: TicketVenta) => {
+    const docKey = (ticket.cliente || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const tel = ticket.telefono || clientes[docKey]?.telefono;
+    const texto = generarTextoTicketWhatsApp(ticket);
+
+    const cfg = getWhatsAppCentralConfig();
+    if (cfg.serverUrl && tel && tel.replace(/\D/g, '').length >= 8) {
+      showToast('Enviando comprobante por WhatsApp Central...');
+      const res = await enviarWhatsAppCentral(tel, texto);
+      if (res.ok) {
+        showToast('✓ Comprobante enviado con éxito por WhatsApp Central');
+        return;
+      }
+    }
 
     if (tel && tel.replace(/\D/g, '').length >= 8) {
       let cleanPhone = tel.replace(/\D/g, '');
@@ -4807,6 +4858,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
                   currentTheme={themeConfig}
                   onSaveTheme={handleSaveTheme}
                   onResetTheme={handleResetTheme}
+                  onOpenWhatsAppCentral={() => setModalWhatsAppCentralOpen(true)}
                 />
               </section>
             )}
@@ -6763,6 +6815,7 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
           setEditPerfil(perfil);
           setModalCuentaOpen(true);
         }}
+        onOpenWhatsAppCentral={() => setModalWhatsAppCentralOpen(true)}
         onLogout={handleLogout}
       />
 
@@ -6847,6 +6900,13 @@ Medio de pago: ${ticket.medioPago.toUpperCase()}${pagoDetalle}${transferenciaTxt
         clientPhones={clientPhones}
         clientes={clientes}
         onCobrar={handleCobrarCarrito}
+      />
+
+      {/* MODAL WHATSAPP CENTRAL AUTOMATIZADO */}
+      <ModalWhatsAppCentral
+        isOpen={modalWhatsAppCentralOpen}
+        onClose={() => setModalWhatsAppCentralOpen(false)}
+        isAdmin={isAdmin}
       />
     </>
   );

@@ -15,6 +15,7 @@ interface ConfiguracionViewProps {
   currentTheme: ThemeConfig;
   onSaveTheme: (newTheme: ThemeConfig) => void;
   onResetTheme: () => void;
+  onOpenWhatsAppCentral?: () => void;
 }
 
 const PALETAS_PREDEFINIDAS = [
@@ -31,6 +32,7 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   currentTheme,
   onSaveTheme,
   onResetTheme,
+  onOpenWhatsAppCentral,
 }) => {
   const [tema, setTema] = useState<ThemeConfig>(currentTheme);
   const [cargandoImagen, setCargandoImagen] = useState<boolean>(false);
@@ -548,6 +550,47 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
           🔄 Restablecer Todo
         </button>
       </div>
+
+      {/* SECCIÓN 5: WHATSAPP CENTRAL AUTOMATIZADO */}
+      {onOpenWhatsAppCentral && (
+        <div
+          className="card"
+          style={{
+            padding: '16px 18px',
+            margin: 0,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+            border: '1px solid rgba(34, 197, 94, 0.35)',
+            background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.02) 100%)',
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '0.98rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📱</span>
+              <span style={{ color: '#22c55e' }}>WhatsApp Central Automatizado</span>
+            </div>
+            <div className="sub" style={{ fontSize: '0.78rem', marginTop: 3 }}>
+              Vincular cuenta oficial vía código QR para despachar comprobantes y recordatorios sin costo.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{
+              padding: '8px 16px',
+              fontSize: '0.84rem',
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+            }}
+            onClick={onOpenWhatsAppCentral}
+          >
+            ⚙️ Configurar WhatsApp Central
+          </button>
+        </div>
+      )}
     </div>
   );
 };

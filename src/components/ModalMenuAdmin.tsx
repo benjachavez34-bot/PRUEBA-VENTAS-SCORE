@@ -12,6 +12,7 @@ interface ModalMenuAdminProps {
   avatarId?: string;
   mensajesNoLeidos?: number;
   onOpenMiCuenta: () => void;
+  onOpenWhatsAppCentral?: () => void;
   onLogout: () => void;
 }
 
@@ -26,6 +27,7 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
   avatarId,
   mensajesNoLeidos = 0,
   onOpenMiCuenta,
+  onOpenWhatsAppCentral,
   onLogout,
 }) => {
   if (!isOpen) return null;
@@ -298,6 +300,43 @@ export const ModalMenuAdmin: React.FC<ModalMenuAdminProps> = ({
                 </div>
                 <span style={{ fontSize: '1.1rem', color: 'var(--muted)' }}>→</span>
               </button>
+
+              {/* WHATSAPP CENTRAL AUTOMATIZADO */}
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => {
+                    onClose();
+                    if (onOpenWhatsAppCentral) onOpenWhatsAppCentral();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    background: 'rgba(34, 197, 94, 0.08)',
+                    border: '1px solid rgba(34, 197, 94, 0.35)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: '1.35rem' }}>📱</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#22c55e' }}>
+                        WhatsApp Central Automatizado
+                      </div>
+                      <div className="sub" style={{ fontSize: '0.75rem' }}>
+                        Vincular número QR para despacho de comprobantes y cobros
+                      </div>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '1.1rem', color: '#22c55e' }}>→</span>
+                </button>
+              )}
 
               {/* CONFIGURACIÓN & TEMA */}
               <button
